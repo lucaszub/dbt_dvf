@@ -1,0 +1,113 @@
+version: 2
+
+models:
+  - name: dvf_silver
+    description: |
+      **Couche Silver - Données DVF nettoyées et standardisées**
+
+      Ce modèle transforme les données brutes DVF (Demandes de Valeurs Foncières) en appliquant :
+      - Conversion des dates au format DATE
+      - Conversion des valeurs monétaires et numériques (remplacement virgule par point)
+      - Filtrage des transactions valides (valeur foncière > 20 000€)
+      - Sélection uniquement des ventes
+
+      Source : VALFONC_RAW.BRONZE.DVF_RAW_VARCHAR
+
+    columns:
+      - name: DATE_MUTATION
+        description: |
+          Date de la mutation (transaction immobilière).
+          Convertie du format DD/MM/YYYY texte vers type DATE.
+        tests:
+          - not_null
+
+      - name: NATURE_MUTATION
+        description: |
+          Nature de la mutation immobilière.
+          Valeurs possibles : 'Vente' (seules les ventes sont conservées dans cette vue).
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Vente']
+
+      - name: VALEUR_FONCIERE
+        description: |
+          Montant de la transaction en euros.
+          Converti en type numérique (virgule → point).
+          Filtre appliqué : > 20 000 €.
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 20000"
+
+      - name: NO_VOIE
+        description: Numéro de voie de l'adresse du bien.
+
+      - name: BTQ
+        description: Complément d'adresse (bis, ter, quater...).
+
+      - name: TYPE_DE_VOIE
+        description: |
+          Type de voie (RUE, AV, BD, CHE, IMP...).
+          Exemple : RUE, AVENUE, BOULEVARD, CHEMIN, IMPASSE.
+
+      - name: CODE_VOIE
+        description: Code FANTOIR de la voie (identifiant unique national).
+
+      - name: VOIE
+        description: Nom de la voie (rue, avenue, etc.).
+
+      - name: CODE_POSTAL
+        description: Code postal de la commune où se situe le bien.
+
+      - name: COMMUNE
+        description: Nom de la commune où se situe le bien.
+
+      - name: CODE_DEPARTEMENT
+        description: |
+          Code département (2 chiffres pour métropole, 3 pour DOM).
+          Exemple : 75 (Paris), 13 (Bouches-du-Rhône), 971 (Guadeloupe).
+
+      - name: PREFIXE_DE_SECTION
+        description: |
+          Préfixe de la section cadastrale.
+          Utilisé avec SECTION pour identifier une zone cadastrale.
+
+      - name: SECTION
+        description: |
+          Section cadastrale du bien.
+          Combiné avec NO_PLAN pour identifier une parcelle.
+
+      - name: NO_PLAN
+        description: |
+          Numéro de plan cadastral (identifiant de la parcelle dans la section).
+
+      - name: NO_VOLUME
+        description: |
+          Numéro de volume (cas des lots en copropriété).
+          Peut être NULL pour les parcelles simples.
+
+      - name: TYPE_LOCAL
+        description: |
+          Type de bien immobilier.
+          Valeurs courantes : Maison, Appartement, Local industriel, Dépendance.
+
+      - name: SURFACE_REELLE_BATI
+        description: |
+          Surface réelle du bâti en m² (surface habitable).
+          Convertie en numérique (virgule → point).
+
+      - name: NOMBRE_PIECES_PRINCIPALES
+        description: |
+          Nombre de pièces principales du bien (chambres, salon, salle à manger...).
+          Exclut généralement cuisine, sdb, wc, couloirs.
+
+      - name: NATURE_CULTURE
+        description: |
+          Nature de la culture ou usage du terrain.
+          Exemple : terres, prés, vergers, bois, sol, jardins.
+
+      - name: SURFACE_TERRAIN
+        description: |
+          Surface du terrain en m².
+          Convertie en numérique (virgule → point).
