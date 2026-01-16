@@ -284,15 +284,9 @@ Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
 ## 👤 Auteur
 
 **Votre Nom**
-- GitHub: [@votre-username](https://github.com/votre-username)
-- LinkedIn: [Votre Profil](https://www.linkedin.com/in/votre-profil/)
+- GitHub: [@votre-username](https://github.com/lucaszub)
+- LinkedIn: [Votre Profil](https://www.linkedin.com/in/lucas-zubiarrain/)
 
-## ⭐ Remerciements
-
-- **DGFiP** pour la mise à disposition des données DVF en open data
-- **Communauté dbt** pour l'excellent outil de transformation de données
-- **data.gouv.fr** pour la plateforme de données publiques françaises
 
 ---
 
-**Keywords:** DVF, Demandes de Valeurs Foncières, dbt, data engineering, immobilier, real estate analytics, open data France, Snowflake, data warehouse, star schema, dimensional modeling, ETL, ELT, business intelligence, data pipeline, analytics engineering, property valuation, French real estate data, transaction immobilière, données publiques, medallion architecture, bronze silver gold
