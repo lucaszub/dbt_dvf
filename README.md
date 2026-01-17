@@ -20,7 +20,7 @@
 
 ## ✨ Fonctionnalités principales
 
-### 🏗️ Architecture moderne
+### 🏗️ Architecture modernes
 - **Medallion Architecture** : Bronze → Silver → Gold
 - **Star Schema** : Modèle dimensionnel optimisé pour les requêtes analytiques
 - **Incremental Processing** : Pipeline de transformation performant avec dbt
