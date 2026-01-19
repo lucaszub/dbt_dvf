@@ -1,5 +1,115 @@
 version: 2
 
+models:
+  # =============================================================================
+  # BAN ADDRESSES NORMALIZED - Préparation pour matching
+  # =============================================================================
+  - name: ban_addresses_normalized
+    description: |
+      **BAN Addresses Normalized - Couche Silver optimisée pour le géocodage**
+
+      Préparation des adresses BAN (Base Adresse Nationale) avec création de clés
+      de matching multiples pour faciliter la jointure avec les adresses DVF.
+
+      **🎯 Objectif :**
+      Optimiser les performances et la qualité du matching adresse DVF ↔ BAN
+      en pré-calculant des clés de jointure à différents niveaux de précision.
+
+      **🔧 Transformations appliquées :**
+      1. Normalisation stricte (UPPER, TRIM, REGEXP_REPLACE espaces multiples)
+      2. Création de 5 clés de matching :
+         - MATCH_KEY_EXACT : numéro + répétition + nom voie complet + CP + commune
+         - MATCH_KEY_SANS_TYPE : numéro + voie (sans type) + CP + commune
+         - MATCH_KEY_VOIE : nom voie + CP + commune (sans numéro)
+         - MATCH_KEY_CODE_POSTAL : code postal + commune
+         - MATCH_KEY_COMMUNE : code INSEE seul
+      3. Extraction du nom de voie sans type (suppression RUE, AVENUE, etc.)
+      4. Calcul de scores de qualité (précision + certification)
+      5. Filtrage coordonnées GPS valides (France métropolitaine)
+
+      **📊 Colonnes clés générées :**
+      - NUMERO_COMPLET : numéro + répétition (ex: "12 BIS")
+      - NOM_VOIE_SANS_TYPE : voie épurée pour matching flexible
+      - MATCH_KEY_* : clés de jointure pré-calculées
+      - QUALITY_SCORE : score combiné (précision + certification)
+      - PRECISION_SCORE : score basé sur TYPE_POSITION
+
+      **🎯 Utilisation :**
+      Source pour dim_address_enriched (matching multi-niveaux).
+      Matérialisé en VIEW pour fraîcheur des données BAN.
+
+      **Grain :** Une ligne par adresse BAN avec coordonnées GPS valides
+
+    columns:
+      - name: BAN_ID
+        description: Identifiant unique BAN
+        tests:
+          - unique
+          - not_null
+
+      - name: MATCH_KEY_EXACT
+        description: |
+          Clé de matching niveau 1 (la plus précise).
+          Format : numero|repetition|nom_voie_complet|code_postal|commune
+        tests:
+          - not_null
+
+      - name: MATCH_KEY_SANS_TYPE
+        description: |
+          Clé de matching niveau 2 (sans type de voie).
+          Gère les variations "Rue Victor Hugo" vs "Victor Hugo"
+        tests:
+          - not_null
+
+      - name: MATCH_KEY_VOIE
+        description: |
+          Clé de matching niveau 3 (voie seule, sans numéro).
+          Utilisée pour centroïde de rue
+        tests:
+          - not_null
+
+      - name: MATCH_KEY_CODE_POSTAL
+        description: |
+          Clé de matching niveau 4 (code postal + commune).
+          Fallback pour adresses incomplètes
+        tests:
+          - not_null
+
+      - name: MATCH_KEY_COMMUNE
+        description: |
+          Clé de matching niveau 5 (code INSEE seul).
+          Dernier recours avant NO_MATCH
+        tests:
+          - not_null
+
+      - name: LONGITUDE
+        description: |
+          Longitude GPS (WGS84).
+          Filtrée pour France métropolitaine : -5.5 à 10.0
+        tests:
+          - not_null
+
+      - name: LATITUDE
+        description: |
+          Latitude GPS (WGS84).
+          Filtrée pour France métropolitaine : 41.0 à 51.5
+        tests:
+          - not_null
+
+      - name: QUALITY_SCORE
+        description: |
+          Score de qualité combiné (10-110).
+          = PRECISION_SCORE + CERTIFICATION_SCORE (0 ou 10)
+        tests:
+          - not_null
+
+      - name: TYPE_POSITION
+        description: |
+          Type de positionnement BAN.
+          Valeurs : HOUSENUMBER, INTERPOLATION, STREET, LOCALITY, MUNICIPALITY
+        tests:
+          - not_null
+
 sources:
   - name: bronze
     database: VALFONC_RAW

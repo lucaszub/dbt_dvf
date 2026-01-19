@@ -30,9 +30,23 @@ WITH clean AS (
   WHERE NATURE_MUTATION IN ('Vente')
 ),
 
-dim_address AS (
-  SELECT ADDRESS_ID, NO_VOIE, TYPE_DE_VOIE, VOIE, CODE_POSTAL, COMMUNE, CODE_DEPARTEMENT
-  FROM {{ ref('dim_address') }}
+dim_address_enriched AS (
+  SELECT
+    ADDRESS_ID,
+    NO_VOIE,
+    TYPE_DE_VOIE,
+    VOIE,
+    CODE_POSTAL,
+    COMMUNE,
+    CODE_DEPARTEMENT,
+    -- Enrichissement BAN
+    BAN_ID,
+    CODE_INSEE,
+    LONGITUDE,
+    LATITUDE,
+    MATCH_LEVEL,
+    MATCH_SCORE
+  FROM {{ ref('dim_address_enriched') }}
 ),
 
 dim_commune AS (
@@ -68,7 +82,15 @@ SELECT
   dtl.TYPE_LOCAL_ID,
   dcp.CODE_POSTAL_ID,
 
-  /* Stratégie de match (traçabilité) */
+  /* Enrichissement géographique BAN */
+  da.BAN_ID,
+  da.CODE_INSEE,
+  da.LONGITUDE,
+  da.LATITUDE,
+
+  /* Qualité du géocodage (traçabilité) */
+  da.MATCH_LEVEL AS GEOCODING_MATCH_LEVEL,
+  da.MATCH_SCORE AS GEOCODING_MATCH_SCORE,
   CASE
     WHEN da.ADDRESS_ID IS NOT NULL THEN 'MATCH_ADDRESS'
     WHEN dc.COMMUNE_ID IS NOT NULL THEN 'FALLBACK_COMMUNE'
@@ -83,12 +105,11 @@ SELECT
   c.NOMBRE_PIECES_PRINCIPALES,
   c.SURFACE_TERRAIN,
 
-
   CURRENT_TIMESTAMP() AS CREATED_AT
 
 FROM clean c
-/* Adresse – jointure sur 6 champs normalisés */
-LEFT JOIN dim_address da
+/* Adresse enrichie BAN – jointure sur 6 champs normalisés */
+LEFT JOIN dim_address_enriched da
   ON da.NO_VOIE          = c.NO_VOIE_N
  AND da.TYPE_DE_VOIE     = c.TYPE_DE_VOIE_N
  AND da.VOIE             = c.VOIE_N

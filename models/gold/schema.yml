@@ -87,6 +87,367 @@ models:
           - not_null
 
   # =============================================================================
+  # DIMENSION : ADRESSES ENRICHIES BAN
+  # =============================================================================
+  - name: dim_address_enriched
+    description: |
+      **Dimension Adresse Enrichie - Géocodage BAN (Base Adresse Nationale)**
+
+      Table de dimension contenant toutes les adresses uniques issues des transactions DVF,
+      enrichies avec les coordonnées GPS et les métadonnées de la Base Adresse Nationale.
+
+      **🎯 Objectif :** Permettre des analyses géospatiales précises en associant chaque adresse DVF
+      à ses coordonnées géographiques exactes via un matching multi-niveaux avec la BAN.
+
+      **🔄 Stratégie de matching (du plus précis au moins précis) :**
+
+      | Niveau | Critères | Score | Précision GPS |
+      |--------|----------|-------|---------------|
+      | EXACT | Numéro + nom voie complet + CP + commune | 100 | ⭐⭐⭐⭐⭐ < 10m |
+      | SANS_TYPE | Numéro + voie (sans type) + CP + commune | 90 | ⭐⭐⭐⭐ ~10-20m |
+      | VOIE_SEULE | Nom voie + CP + commune (centroïde rue) | 70 | ⭐⭐⭐ ~50-200m |
+      | CODE_POSTAL | Code postal + commune (centroïde CP) | 50 | ⭐⭐ ~200-500m |
+      | COMMUNE | Code INSEE seul (centroïde commune) | 30 | ⭐ > 500m |
+      | NO_MATCH | Aucun enrichissement trouvé | 0 | ❌ Pas de coordonnées |
+
+      **📊 Processus de construction :**
+      1. Extraction des adresses uniques depuis DVF (normalisation stricte)
+      2. Création de clés de matching multiples (exact, sans type, voie seule, etc.)
+      3. Jointures successives avec ban_addresses_normalized à différents niveaux
+      4. Sélection du meilleur match (score de qualité + précision)
+      5. Calcul des métadonnées de qualité (MATCH_LEVEL, MATCH_SCORE)
+
+      **✨ Enrichissements disponibles :**
+      - 🗺️ Coordonnées GPS (WGS84) : LONGITUDE, LATITUDE
+      - 📍 Coordonnées Lambert 93 : X_LAMBERT93, Y_LAMBERT93 (pour calculs de distance)
+      - 🏛️ Code INSEE commune + ID FANTOIR voie
+      - 📦 Parcelles cadastrales associées (depuis BAN)
+      - ✅ Métadonnées qualité : niveau de matching, score de confiance
+
+      **🎯 Utilisation :**
+      - Cartographie des transactions (Power BI Maps, Tableau, QGIS)
+      - Calculs de distance entre biens
+      - Analyses de proximité (transports, écoles, commerces)
+      - Clustering géographique et hotspots
+      - Filtrage par qualité de géocodage
+
+      **Grain :** Une ligne par adresse unique DVF avec enrichissement BAN optimal
+
+    columns:
+      # -------------------------------------------------------------------------
+      # IDENTIFIANTS
+      # -------------------------------------------------------------------------
+      - name: ADDRESS_ID
+        description: |
+          **Clé primaire technique** - Identifiant unique de l'adresse.
+
+          Générée via HASH des 6 composants DVF normalisés (NO_VOIE + TYPE_DE_VOIE + VOIE + CODE_POSTAL + COMMUNE + CODE_DEPARTEMENT).
+          Format HEX (XXXXXXXXXXXXXXXX) compatible Power BI.
+
+          Cette clé est stable et identique à celle de l'ancienne dim_address pour compatibilité ascendante.
+        tests:
+          - unique
+          - not_null
+
+      - name: BAN_ID
+        description: |
+          **Identifiant BAN** - ID unique de l'adresse dans la Base Adresse Nationale.
+
+          NULL si aucun match BAN trouvé (MATCH_LEVEL = 'NO_MATCH' ou matching par centroïde).
+
+          Présent uniquement pour les niveaux EXACT et SANS_TYPE (matching précis sur adresse complète).
+
+          **Utilisation :** Lien vers le référentiel BAN pour enrichissements futurs.
+
+      # -------------------------------------------------------------------------
+      # ADRESSE DVF (normalisée)
+      # -------------------------------------------------------------------------
+      - name: NO_VOIE
+        description: |
+          Numéro de voie normalisé (UPPER + TRIM).
+          Exemple : "123", "45"
+
+      - name: TYPE_DE_VOIE
+        description: |
+          Type de voie normalisé (UPPER + TRIM).
+          Exemples : RUE, AVENUE, BOULEVARD, CHEMIN, IMPASSE, PLACE
+
+      - name: VOIE
+        description: |
+          Nom de la voie normalisé (UPPER + TRIM + espaces multiples écrasés).
+          Exemples : "VICTOR HUGO", "DE LA REPUBLIQUE"
+
+      - name: CODE_POSTAL
+        description: |
+          Code postal normalisé (TRIM).
+          Format : 5 chiffres pour métropole.
+        tests:
+          - not_null
+
+      - name: COMMUNE
+        description: |
+          Nom de la commune normalisé (UPPER + TRIM).
+          Exemples : "PARIS", "MARSEILLE", "LYON"
+        tests:
+          - not_null
+
+      - name: CODE_DEPARTEMENT
+        description: |
+          Code département normalisé (TRIM).
+          Format : 2 ou 3 chiffres.
+        tests:
+          - not_null
+
+      - name: ADDRESS_FULL
+        description: |
+          **Adresse complète formatée** pour affichage.
+
+          Concaténation : NO_VOIE + TYPE_DE_VOIE + VOIE + CODE_POSTAL + COMMUNE
+
+          Exemple : "123 RUE VICTOR HUGO, 75001 PARIS"
+
+      # -------------------------------------------------------------------------
+      # ENRICHISSEMENT BAN
+      # -------------------------------------------------------------------------
+      - name: CODE_INSEE
+        description: |
+          **Code INSEE de la commune** (5 chiffres).
+
+          Issu du référentiel BAN, plus fiable que le nom de commune pour les analyses administratives.
+
+          Exemples : "75101" (Paris 1er), "13055" (Marseille)
+
+          NULL si aucun match BAN trouvé.
+
+      - name: ID_FANTOIR
+        description: |
+          **Identifiant FANTOIR de la voie** - Code national unique de la voie.
+
+          Format : CODE_INSEE (5) + CODE_VOIE (4) = 9 caractères
+
+          Le FANTOIR (Fichier Annuaire Topographique Initialisé Réduit) est le référentiel
+          national des voies géré par la DGFiP.
+
+          NULL si matching par centroïde (pas de voie précise identifiée).
+
+      # -------------------------------------------------------------------------
+      # COORDONNÉES GÉOGRAPHIQUES
+      # -------------------------------------------------------------------------
+      - name: LONGITUDE
+        description: |
+          **Longitude GPS** en degrés décimaux (système WGS84).
+
+          Plage France métropolitaine : -5.5 à 10.0
+
+          NULL si MATCH_LEVEL = 'NO_MATCH'.
+
+          **Utilisation :**
+          - Cartographie web (Google Maps, Leaflet, Mapbox)
+          - Power BI Maps, Tableau
+          - Analyses géospatiales
+
+          **Précision :** Dépend du MATCH_LEVEL (voir TYPE_POSITION)
+
+      - name: LATITUDE
+        description: |
+          **Latitude GPS** en degrés décimaux (système WGS84).
+
+          Plage France métropolitaine : 41.0 à 51.5
+
+          NULL si MATCH_LEVEL = 'NO_MATCH'.
+
+          **Utilisation :**
+          - Cartographie web
+          - Calculs de distance (formule haversine)
+          - Géolocalisation
+
+          **Précision :** Dépend du MATCH_LEVEL (voir TYPE_POSITION)
+
+      - name: X_LAMBERT93
+        description: |
+          **Coordonnée X en projection Lambert 93** (mètres).
+
+          Le Lambert 93 (EPSG:2154) est la projection officielle française, recommandée pour :
+          - Calculs de distance précis sur le territoire français
+          - SIG (Systèmes d'Information Géographique)
+          - Calculs d'aire et de périmètre
+
+          NULL si pas de coordonnées GPS disponibles.
+
+          **Avantage vs GPS :** Unités métriques directes, pas de distorsion sphérique.
+
+      - name: Y_LAMBERT93
+        description: |
+          **Coordonnée Y en projection Lambert 93** (mètres).
+
+          Complément de X_LAMBERT93 pour positionnement 2D en projection plane.
+
+          NULL si pas de coordonnées GPS disponibles.
+
+      # -------------------------------------------------------------------------
+      # QUALITÉ DU GÉOCODAGE
+      # -------------------------------------------------------------------------
+      - name: MATCH_LEVEL
+        description: |
+          **Niveau de matching adresse ↔ BAN** (qualité du géocodage).
+
+          Valeurs possibles (ordre décroissant de précision) :
+
+          - **EXACT** (score 100)
+            → Match parfait sur numéro + nom voie complet + CP + commune
+            → Précision GPS : < 10m (adresse exacte)
+            → Recommandé pour analyses géospatiales fines
+
+          - **SANS_TYPE** (score 90)
+            → Match sur numéro + voie (sans type "rue/avenue") + CP + commune
+            → Précision GPS : ~10-20m
+            → Très bonne qualité
+
+          - **VOIE_SEULE** (score 70)
+            → Match sur nom de voie + CP + commune (sans numéro)
+            → Coordonnées = centroïde de la rue
+            → Précision GPS : ~50-200m
+            → Acceptable pour analyses par quartier
+
+          - **CODE_POSTAL** (score 50)
+            → Centroïde du code postal
+            → Précision GPS : ~200-500m
+            → Qualité moyenne, utiliser avec précaution
+
+          - **COMMUNE** (score 30)
+            → Centroïde de la commune (centre géométrique)
+            → Précision GPS : > 500m
+            → Faible précision, éviter pour analyses géospatiales
+
+          - **NO_MATCH** (score 0)
+            → Aucun match BAN trouvé
+            → Pas de coordonnées GPS
+            → Nécessite investigation
+
+          **Utilisation :**
+          Filtrer sur MATCH_LEVEL IN ('EXACT', 'SANS_TYPE') pour analyses géospatiales précises.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['EXACT', 'SANS_TYPE', 'VOIE_SEULE', 'CODE_POSTAL', 'COMMUNE', 'NO_MATCH']
+
+      - name: MATCH_SCORE
+        description: |
+          **Score de qualité du matching** (0-100).
+
+          Corrélé au MATCH_LEVEL :
+          - 100 = EXACT
+          - 90 = SANS_TYPE
+          - 70 = VOIE_SEULE
+          - 50 = CODE_POSTAL
+          - 30 = COMMUNE
+          - 0 = NO_MATCH
+
+          **Utilisation :**
+          - Filtrer les analyses : WHERE MATCH_SCORE >= 70
+          - Pondération par qualité dans les agrégations
+          - KPI de qualité du référentiel
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 30, 50, 70, 90, 100]
+
+      - name: TYPE_POSITION
+        description: |
+          **Type de positionnement GPS** (métadonnée BAN).
+
+          Valeurs possibles :
+
+          - **HOUSENUMBER** : Numéro exact dans la voie (précision < 10m)
+          - **INTERPOLATION** : Numéro interpolé entre deux points connus (~10-50m)
+          - **STREET** : Centroïde de la rue (~50-200m)
+          - **LOCALITY** : Lieu-dit ou hameau (~200-500m)
+          - **MUNICIPALITY** : Centroïde de la commune (> 500m)
+          - **NULL** : Pas de coordonnées (NO_MATCH)
+
+          **Utilisation :**
+          Indicateur de fiabilité du positionnement pour filtrage analyses géospatiales.
+
+      - name: SOURCE_POSITION
+        description: |
+          **Source des coordonnées géographiques**.
+
+          Valeurs courantes :
+          - 'IGN' : Institut National de l'Information Géographique et Forestière
+          - 'CADASTRE' : Direction Générale des Finances Publiques
+          - 'OSM' : OpenStreetMap (contribution communautaire)
+          - 'SDIS' : Service Départemental d'Incendie et de Secours
+          - 'COMMUNE' : Certification par la commune
+          - 'COMPUTED_CENTROID' : Centroïde calculé (CODE_POSTAL ou COMMUNE niveau)
+
+          NULL si pas de coordonnées.
+
+      - name: BAN_QUALITY_SCORE
+        description: |
+          **Score de qualité interne BAN** (calculé depuis precision + certification).
+
+          Combine :
+          - Précision du positionnement (TYPE_POSITION)
+          - Certification par la commune (0-10 points bonus)
+
+          Plage : 10-110
+
+          NULL si pas de match BAN.
+
+          **Utilisation :** Départager plusieurs matchs BAN pour une même adresse DVF.
+
+      # -------------------------------------------------------------------------
+      # ENRICHISSEMENT CADASTRAL
+      # -------------------------------------------------------------------------
+      - name: PARCELLES_CADASTRALES
+        description: |
+          **Liste des parcelles cadastrales** associées à l'adresse (depuis BAN).
+
+          Format : codes parcelles séparés par virgules ou pipes
+          Exemple : "AB0123|AB0124"
+
+          NULL si pas de match BAN ou pas de données cadastrales disponibles.
+
+          **Utilisation :**
+          - Croisement avec dim_parcelle DVF
+          - Validation cohérence adresse ↔ parcelle
+
+      - name: LIBELLE_ACHEMINEMENT
+        description: |
+          **Libellé d'acheminement postal** (nom officiel La Poste).
+
+          Peut différer du nom de commune (arrondissements parisiens, communes déléguées).
+
+          Exemples : "PARIS 01", "LYON 03", "MARSEILLE 08"
+
+          NULL si pas de match BAN.
+
+      - name: NOM_AFNOR
+        description: |
+          **Nom de voie normalisé AFNOR** (norme française Z 10-011).
+
+          Normalisation stricte pour tri alphabétique et indexation.
+
+          NULL si matching par centroïde (pas de voie précise).
+
+      # -------------------------------------------------------------------------
+      # AUDIT
+      # -------------------------------------------------------------------------
+      - name: CREATED_AT
+        description: |
+          Horodatage de création de l'enregistrement.
+          Alimenté via CURRENT_TIMESTAMP() lors du run dbt.
+        tests:
+          - not_null
+
+      - name: UPDATED_AT
+        description: |
+          Horodatage de dernière mise à jour.
+          Identique à CREATED_AT pour ce modèle (pas de mises à jour incrémentales).
+        tests:
+          - not_null
+
+  # =============================================================================
   # DIMENSION : CODES POSTAUX
   # =============================================================================
   - name: dim_code_postal
@@ -365,15 +726,21 @@ models:
   # =============================================================================
   - name: fact_mutation
     description: |
-      **Table de Faits - Mutations immobilières DVF**
+      **Table de Faits - Mutations immobilières DVF avec géocodage BAN**
 
       Table centrale du modèle en étoile contenant toutes les transactions immobilières (ventes).
 
+      **✨ NOUVEAU** : Enrichissement géographique via Base Adresse Nationale (BAN)
+      - Coordonnées GPS (longitude, latitude) pour cartographie
+      - Code INSEE pour croisements statistiques
+      - Métadonnées de qualité du géocodage (GEOCODING_MATCH_LEVEL, GEOCODING_MATCH_SCORE)
+
       **Architecture :**
       - Schéma en étoile (star schema)
-      - Clés étrangères vers 5 dimensions : address, commune, parcelle, type_local, code_postal
+      - Clés étrangères vers 5 dimensions : address_enriched, commune, parcelle, type_local, code_postal
       - Mesures : valeur foncière, surfaces, nombre de pièces
       - Attributs dégénérés : date mutation, nature mutation
+      - Enrichissement géographique : coordonnées GPS BAN
 
       **Stratégie de jointure ADDRESS :**
       La colonne ADDRESS_MATCH_STRATEGY trace la qualité du lien adresse :
@@ -404,9 +771,9 @@ models:
       # -------------------------------------------------------------------------
       - name: ADDRESS_ID
         description: |
-          **Clé étrangère** vers dim_address.
+          **Clé étrangère** vers dim_address_enriched.
 
-          Lien vers l'adresse normalisée du bien.
+          Lien vers l'adresse normalisée enrichie BAN du bien.
 
           **Stratégie de jointure avec fallback :**
           1. Tentative de match sur 6 champs normalisés (NO_VOIE, TYPE_DE_VOIE, VOIE, CP, COMMUNE, DEPT)
@@ -417,7 +784,7 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('dim_address')
+              to: ref('dim_address_enriched')
               field: ADDRESS_ID
 
       - name: COMMUNE_ID
@@ -472,8 +839,114 @@ models:
               field: CODE_POSTAL_ID
 
       # -------------------------------------------------------------------------
+      # ENRICHISSEMENT GÉOGRAPHIQUE BAN
+      # -------------------------------------------------------------------------
+      - name: BAN_ID
+        description: |
+          **Identifiant BAN** - ID unique de l'adresse dans la Base Adresse Nationale.
+
+          Hérité de dim_address_enriched via la jointure.
+
+          NULL si :
+          - Aucun match BAN trouvé (GEOCODING_MATCH_LEVEL = 'NO_MATCH')
+          - Matching par centroïde (CODE_POSTAL ou COMMUNE niveau)
+
+          **Utilisation :**
+          - Filtrer les transactions avec géocodage précis : WHERE BAN_ID IS NOT NULL
+          - Lien vers référentiel BAN pour enrichissements futurs
+
+      - name: CODE_INSEE
+        description: |
+          **Code INSEE de la commune** (5 chiffres).
+
+          Issu du géocodage BAN via dim_address_enriched.
+
+          Plus fiable que le nom de commune pour analyses administratives et croisements INSEE.
+
+          NULL si pas de match BAN.
+
+      - name: LONGITUDE
+        description: |
+          **Longitude GPS** en degrés décimaux (WGS84).
+
+          Coordonnée géographique héritée de dim_address_enriched.
+
+          NULL si pas de géocodage disponible.
+
+          **✨ NOUVEAU** : Permet désormais de cartographier les transactions DVF !
+
+          **Utilisation :**
+          - Visualisation Power BI Maps, Tableau, QGIS
+          - Analyses de proximité (distance à un point d'intérêt)
+          - Clustering géographique (hotspots de prix)
+          - Export vers SIG externe
+
+          **Précision :** Varie selon GEOCODING_MATCH_LEVEL (voir documentation)
+
+      - name: LATITUDE
+        description: |
+          **Latitude GPS** en degrés décimaux (WGS84).
+
+          Coordonnée géographique héritée de dim_address_enriched.
+
+          NULL si pas de géocodage disponible.
+
+          **✨ NOUVEAU** : Active les fonctionnalités géospatiales sur les mutations.
+
+          **Utilisation :**
+          - Cartographie web
+          - Calculs de distance (formule haversine)
+          - Analyses spatiales (rayon, buffer, etc.)
+
+          **Précision :** Varie selon GEOCODING_MATCH_LEVEL
+
+      # -------------------------------------------------------------------------
       # TRAÇABILITÉ QUALITÉ
       # -------------------------------------------------------------------------
+      - name: GEOCODING_MATCH_LEVEL
+        description: |
+          **Niveau de qualité du géocodage BAN** de l'adresse.
+
+          Hérité de dim_address_enriched.MATCH_LEVEL.
+
+          Valeurs possibles (ordre décroissant de précision) :
+          - **EXACT** : Match parfait, précision < 10m
+          - **SANS_TYPE** : Match sans type de voie, précision ~10-20m
+          - **VOIE_SEULE** : Centroïde de rue, précision ~50-200m
+          - **CODE_POSTAL** : Centroïde code postal, précision ~200-500m
+          - **COMMUNE** : Centroïde commune, précision > 500m
+          - **NO_MATCH** : Pas de coordonnées GPS
+
+          **💡 Recommandation :**
+          Pour analyses géospatiales fiables, filtrer sur :
+          ```sql
+          WHERE GEOCODING_MATCH_LEVEL IN ('EXACT', 'SANS_TYPE')
+          ```
+
+          **Utilisation :**
+          - Filtrage qualité pour cartes et analyses spatiales
+          - KPI de couverture géographique
+          - Segmentation par précision du géocodage
+
+      - name: GEOCODING_MATCH_SCORE
+        description: |
+          **Score de qualité du géocodage** (0-100).
+
+          Hérité de dim_address_enriched.MATCH_SCORE.
+
+          Échelle :
+          - 100 = EXACT (meilleure qualité)
+          - 90 = SANS_TYPE
+          - 70 = VOIE_SEULE
+          - 50 = CODE_POSTAL
+          - 30 = COMMUNE
+          - 0 = NO_MATCH (pas de coordonnées)
+
+          **Utilisation :**
+          - Filtrage : WHERE GEOCODING_MATCH_SCORE >= 70
+          - Pondération dans les agrégations
+          - Métriques de qualité du data warehouse
+
       - name: ADDRESS_MATCH_STRATEGY
         description: |
           **Indicateur de qualité du lien adresse**
