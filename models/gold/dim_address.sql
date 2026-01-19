@@ -11,7 +11,7 @@ WITH clean AS (
 )
 SELECT
   /* Clé texte (HEX de 64 bits) – évite tout problème de précision dans Power BI */
-  TO_CHAR(
+    TO_CHAR(
     HASH(
       COALESCE(NO_VOIE_N, '')          || '|' ||
       COALESCE(TYPE_DE_VOIE_N, '')     || '|' ||

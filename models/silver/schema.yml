@@ -1,113 +1,108 @@
 version: 2
 
-models:
-  - name: dvf_silver
+sources:
+  - name: bronze
+    database: VALFONC_RAW
+    schema: BRONZE
     description: |
-      **Couche Silver - Données DVF nettoyées et standardisées**
-
-      Ce modèle transforme les données brutes DVF (Demandes de Valeurs Foncières) en appliquant :
-      - Conversion des dates au format DATE
-      - Conversion des valeurs monétaires et numériques (remplacement virgule par point)
-      - Filtrage des transactions valides (valeur foncière > 20 000€)
-      - Sélection uniquement des ventes
-
-      Source : VALFONC_RAW.BRONZE.DVF_RAW_VARCHAR
-
-    columns:
-      - name: DATE_MUTATION
+      **Couche Bronze - Données brutes**
+      
+      Données sources non transformées, chargées depuis les fichiers sources.
+    
+    tables:
+      - name: DVF_RAW_VARCHAR
         description: |
-          Date de la mutation (transaction immobilière).
-          Convertie du format DD/MM/YYYY texte vers type DATE.
-        tests:
-          - not_null
-
-      - name: NATURE_MUTATION
+          Données brutes DVF (Demandes de Valeurs Foncières) avec toutes les colonnes en VARCHAR.
+          Source originale avant toute transformation.
+        
+      - name: BAN_ADRESSES
         description: |
-          Nature de la mutation immobilière.
-          Valeurs possibles : 'Vente' (seules les ventes sont conservées dans cette vue).
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['Vente']
-
-      - name: VALEUR_FONCIERE
-        description: |
-          Montant de la transaction en euros.
-          Converti en type numérique (virgule → point).
-          Filtre appliqué : > 20 000 €.
-        tests:
-          - not_null
-          - dbt_utils.expression_is_true:
-              expression: ">= 20000"
-
-      - name: NO_VOIE
-        description: Numéro de voie de l'adresse du bien.
-
-      - name: BTQ
-        description: Complément d'adresse (bis, ter, quater...).
-
-      - name: TYPE_DE_VOIE
-        description: |
-          Type de voie (RUE, AV, BD, CHE, IMP...).
-          Exemple : RUE, AVENUE, BOULEVARD, CHEMIN, IMPASSE.
-
-      - name: CODE_VOIE
-        description: Code FANTOIR de la voie (identifiant unique national).
-
-      - name: VOIE
-        description: Nom de la voie (rue, avenue, etc.).
-
-      - name: CODE_POSTAL
-        description: Code postal de la commune où se situe le bien.
-
-      - name: COMMUNE
-        description: Nom de la commune où se situe le bien.
-
-      - name: CODE_DEPARTEMENT
-        description: |
-          Code département (2 chiffres pour métropole, 3 pour DOM).
-          Exemple : 75 (Paris), 13 (Bouches-du-Rhône), 971 (Guadeloupe).
-
-      - name: PREFIXE_DE_SECTION
-        description: |
-          Préfixe de la section cadastrale.
-          Utilisé avec SECTION pour identifier une zone cadastrale.
-
-      - name: SECTION
-        description: |
-          Section cadastrale du bien.
-          Combiné avec NO_PLAN pour identifier une parcelle.
-
-      - name: NO_PLAN
-        description: |
-          Numéro de plan cadastral (identifiant de la parcelle dans la section).
-
-      - name: NO_VOLUME
-        description: |
-          Numéro de volume (cas des lots en copropriété).
-          Peut être NULL pour les parcelles simples.
-
-      - name: TYPE_LOCAL
-        description: |
-          Type de bien immobilier.
-          Valeurs courantes : Maison, Appartement, Local industriel, Dépendance.
-
-      - name: SURFACE_REELLE_BATI
-        description: |
-          Surface réelle du bâti en m² (surface habitable).
-          Convertie en numérique (virgule → point).
-
-      - name: NOMBRE_PIECES_PRINCIPALES
-        description: |
-          Nombre de pièces principales du bien (chambres, salon, salle à manger...).
-          Exclut généralement cuisine, sdb, wc, couloirs.
-
-      - name: NATURE_CULTURE
-        description: |
-          Nature de la culture ou usage du terrain.
-          Exemple : terres, prés, vergers, bois, sol, jardins.
-
-      - name: SURFACE_TERRAIN
-        description: |
-          Surface du terrain en m².
-          Convertie en numérique (virgule → point).
+          **Base Adresse Nationale (BAN) - Données brutes**
+          
+          Référentiel national des adresses françaises.
+          Contient les coordonnées géographiques (GPS + Lambert 93), les codes INSEE,
+          et les informations cadastrales pour chaque adresse en France.
+          
+          Source : data.gouv.fr - Base Adresse Nationale
+          Format : CSV consolidé national
+          
+          **Utilisation :**
+          - Géocodage des adresses DVF
+          - Enrichissement des coordonnées GPS
+          - Validation des codes postaux et communes
+          - Matching avec les parcelles cadastrales
+        
+        columns:
+          - name: id
+            description: Identifiant unique BAN de l'adresse
+          
+          - name: id_fantoir
+            description: Identifiant FANTOIR de la voie (code national)
+          
+          - name: numero
+            description: Numéro de voie
+          
+          - name: rep
+            description: Indice de répétition (bis, ter, quater, etc.)
+          
+          - name: nom_voie
+            description: Nom complet de la voie
+          
+          - name: code_postal
+            description: Code postal (5 chiffres)
+          
+          - name: code_insee
+            description: Code INSEE de la commune (5 chiffres)
+          
+          - name: nom_commune
+            description: Nom officiel de la commune
+          
+          - name: code_insee_ancienne_commune
+            description: Code INSEE de l'ancienne commune (avant fusion)
+          
+          - name: nom_ancienne_commune
+            description: Nom de l'ancienne commune (avant fusion)
+          
+          - name: x
+            description: Coordonnée X en projection Lambert 93 (mètres)
+          
+          - name: y
+            description: Coordonnée Y en projection Lambert 93 (mètres)
+          
+          - name: lon
+            description: Longitude en WGS84 (degrés décimaux)
+          
+          - name: lat
+            description: Latitude en WGS84 (degrés décimaux)
+          
+          - name: type_position
+            description: |
+              Précision du positionnement géographique.
+              Valeurs : housenumber, street, locality, municipality
+          
+          - name: alias
+            description: Indicateur si l'adresse est un alias (0 ou 1)
+          
+          - name: nom_ld
+            description: Nom du lieu-dit (si applicable)
+          
+          - name: libelle_acheminement
+            description: Libellé d'acheminement postal
+          
+          - name: nom_afnor
+            description: Nom de voie normalisé AFNOR
+          
+          - name: source_position
+            description: Source des coordonnées géographiques
+          
+          - name: source_nom_voie
+            description: Source du nom de voie
+          
+          - name: certification_commune
+            description: Niveau de certification par la commune (0 ou 1)
+          
+          - name: cad_parcelles
+            description: Liste des parcelles cadastrales associées
+          
+          - name: departement
+            description: Code département (2 ou 3 chiffres)
