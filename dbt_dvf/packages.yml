@@ -1,7 +1,9 @@
-packages:
-  - package: dbt-labs/dbt_utils
-    # préciser une version évite des erreurs de parsing/compatibilité
-    # utiliser une liste pour exprimer un intervalle de versions
-    version:
-      - ">=0.8.0"
-      - "<1.0.0"
+
+# Proxi qui bloque à corriger hors package
+# packages:
+#   - package: dbt-labs/dbt_utils
+#     # préciser une version évite des erreurs de parsing/compatibilité
+#     # utiliser une liste pour exprimer un intervalle de versions
+#     version:
+#       - ">=0.8.0"
+#       - "<1.0.0"

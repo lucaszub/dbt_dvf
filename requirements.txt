@@ -1,0 +1,9 @@
+dbt-snowflake
+
+python-dotenv
+
+
+snowflake-connector-python
+fastapi 
+uvicorn
+pydantic
