@@ -1,0 +1,60 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# dbt
+dbt_dvf/target/
+dbt_dvf/dbt_packages/
+dbt_dvf/logs/
+dbt_dvf/dbt_internal_packages/
+*.log
+
+# Environnement et secrets
+.env
+.env.*
+.env.local
+.env.*.local
+*.env
+profiles.yml
+credentials.json
+secrets.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Cache
+.cache/
+*.cache
+
+# BMAD output (generated artifacts)
+_bmad-output/

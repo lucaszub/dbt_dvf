@@ -1,0 +1,41 @@
+{
+  "workflow_version": "1.2.0",
+  "timestamps": {
+    "started": "2026-01-20T12:00:00Z",
+    "last_updated": "2026-01-20T12:00:00Z"
+  },
+  "mode": "initial_scan",
+  "scan_level": "deep",
+  "project_root": "/home/lucas-zubiarrain/dvf",
+  "output_folder": "/home/lucas-zubiarrain/dvf/docs",
+  "repository_type": "monolith",
+  "project_types": [
+    {
+      "part_id": "dbt_dvf",
+      "project_type_id": "data",
+      "display_name": "DVF Analytics - Data Engineering Platform"
+    }
+  ],
+  "project_classification": {
+    "name": "DVF Analytics",
+    "type": "data",
+    "architecture": "Medallion (Bronze → Silver → Gold) + Star Schema",
+    "database": "Snowflake",
+    "primary_tech": "dbt + SQL",
+    "sources": ["DVF (Demandes de Valeurs Foncières)", "BAN (Base Adresse Nationale)"]
+  },
+  "completed_steps": [
+    {
+      "step": "step_1",
+      "status": "completed",
+      "timestamp": "2026-01-20T12:00:00Z",
+      "summary": "Classified as monolith data project with dbt + Snowflake"
+    }
+  ],
+  "current_step": "step_2",
+  "findings": {
+    "project_classification": "monolith, 1 part, dbt + SQL on Snowflake"
+  },
+  "outputs_generated": ["project-scan-report.json"],
+  "resume_instructions": "Starting from step 2 - Discover existing documentation"
+}

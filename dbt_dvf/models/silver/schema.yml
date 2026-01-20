@@ -1,0 +1,218 @@
+version: 2
+
+models:
+  # =============================================================================
+  # BAN ADDRESSES NORMALIZED - Préparation pour matching
+  # =============================================================================
+  - name: ban_addresses_normalized
+    description: |
+      **BAN Addresses Normalized - Couche Silver optimisée pour le géocodage**
+
+      Préparation des adresses BAN (Base Adresse Nationale) avec création de clés
+      de matching multiples pour faciliter la jointure avec les adresses DVF.
+
+      **🎯 Objectif :**
+      Optimiser les performances et la qualité du matching adresse DVF ↔ BAN
+      en pré-calculant des clés de jointure à différents niveaux de précision.
+
+      **🔧 Transformations appliquées :**
+      1. Normalisation stricte (UPPER, TRIM, REGEXP_REPLACE espaces multiples)
+      2. Création de 5 clés de matching :
+         - MATCH_KEY_EXACT : numéro + répétition + nom voie complet + CP + commune
+         - MATCH_KEY_SANS_TYPE : numéro + voie (sans type) + CP + commune
+         - MATCH_KEY_VOIE : nom voie + CP + commune (sans numéro)
+         - MATCH_KEY_CODE_POSTAL : code postal + commune
+         - MATCH_KEY_COMMUNE : code INSEE seul
+      3. Extraction du nom de voie sans type (suppression RUE, AVENUE, etc.)
+      4. Calcul de scores de qualité (précision + certification)
+      5. Filtrage coordonnées GPS valides (France métropolitaine)
+
+      **📊 Colonnes clés générées :**
+      - NUMERO_COMPLET : numéro + répétition (ex: "12 BIS")
+      - NOM_VOIE_SANS_TYPE : voie épurée pour matching flexible
+      - MATCH_KEY_* : clés de jointure pré-calculées
+      - QUALITY_SCORE : score combiné (précision + certification)
+      - PRECISION_SCORE : score basé sur TYPE_POSITION
+
+      **🎯 Utilisation :**
+      Source pour dim_address_enriched (matching multi-niveaux).
+      Matérialisé en VIEW pour fraîcheur des données BAN.
+
+      **Grain :** Une ligne par adresse BAN avec coordonnées GPS valides
+
+    columns:
+      - name: BAN_ID
+        description: Identifiant unique BAN
+        tests:
+          - unique
+          - not_null
+
+      - name: MATCH_KEY_EXACT
+        description: |
+          Clé de matching niveau 1 (la plus précise).
+          Format : numero|repetition|nom_voie_complet|code_postal|commune
+        tests:
+          - not_null
+
+      - name: MATCH_KEY_SANS_TYPE
+        description: |
+          Clé de matching niveau 2 (sans type de voie).
+          Gère les variations "Rue Victor Hugo" vs "Victor Hugo"
+        tests:
+          - not_null
+
+      - name: MATCH_KEY_VOIE
+        description: |
+          Clé de matching niveau 3 (voie seule, sans numéro).
+          Utilisée pour centroïde de rue
+        tests:
+          - not_null
+
+      - name: MATCH_KEY_CODE_POSTAL
+        description: |
+          Clé de matching niveau 4 (code postal + commune).
+          Fallback pour adresses incomplètes
+        tests:
+          - not_null
+
+      - name: MATCH_KEY_COMMUNE
+        description: |
+          Clé de matching niveau 5 (code INSEE seul).
+          Dernier recours avant NO_MATCH
+        tests:
+          - not_null
+
+      - name: LONGITUDE
+        description: |
+          Longitude GPS (WGS84).
+          Filtrée pour France métropolitaine : -5.5 à 10.0
+        tests:
+          - not_null
+
+      - name: LATITUDE
+        description: |
+          Latitude GPS (WGS84).
+          Filtrée pour France métropolitaine : 41.0 à 51.5
+        tests:
+          - not_null
+
+      - name: QUALITY_SCORE
+        description: |
+          Score de qualité combiné (10-110).
+          = PRECISION_SCORE + CERTIFICATION_SCORE (0 ou 10)
+        tests:
+          - not_null
+
+      - name: TYPE_POSITION
+        description: |
+          Type de positionnement BAN.
+          Valeurs : HOUSENUMBER, INTERPOLATION, STREET, LOCALITY, MUNICIPALITY
+        tests:
+          - not_null
+
+sources:
+  - name: bronze
+    database: VALFONC_RAW
+    schema: BRONZE
+    description: |
+      **Couche Bronze - Données brutes**
+      
+      Données sources non transformées, chargées depuis les fichiers sources.
+    
+    tables:
+      - name: DVF_RAW_VARCHAR
+        description: |
+          Données brutes DVF (Demandes de Valeurs Foncières) avec toutes les colonnes en VARCHAR.
+          Source originale avant toute transformation.
+        
+      - name: BAN_ADRESSES
+        description: |
+          **Base Adresse Nationale (BAN) - Données brutes**
+          
+          Référentiel national des adresses françaises.
+          Contient les coordonnées géographiques (GPS + Lambert 93), les codes INSEE,
+          et les informations cadastrales pour chaque adresse en France.
+          
+          Source : data.gouv.fr - Base Adresse Nationale
+          Format : CSV consolidé national
+          
+          **Utilisation :**
+          - Géocodage des adresses DVF
+          - Enrichissement des coordonnées GPS
+          - Validation des codes postaux et communes
+          - Matching avec les parcelles cadastrales
+        
+        columns:
+          - name: id
+            description: Identifiant unique BAN de l'adresse
+          
+          - name: id_fantoir
+            description: Identifiant FANTOIR de la voie (code national)
+          
+          - name: numero
+            description: Numéro de voie
+          
+          - name: rep
+            description: Indice de répétition (bis, ter, quater, etc.)
+          
+          - name: nom_voie
+            description: Nom complet de la voie
+          
+          - name: code_postal
+            description: Code postal (5 chiffres)
+          
+          - name: code_insee
+            description: Code INSEE de la commune (5 chiffres)
+          
+          - name: nom_commune
+            description: Nom officiel de la commune
+          
+          - name: code_insee_ancienne_commune
+            description: Code INSEE de l'ancienne commune (avant fusion)
+          
+          - name: nom_ancienne_commune
+            description: Nom de l'ancienne commune (avant fusion)
+          
+          - name: x
+            description: Coordonnée X en projection Lambert 93 (mètres)
+          
+          - name: y
+            description: Coordonnée Y en projection Lambert 93 (mètres)
+          
+          - name: lon
+            description: Longitude en WGS84 (degrés décimaux)
+          
+          - name: lat
+            description: Latitude en WGS84 (degrés décimaux)
+          
+          - name: type_position
+            description: |
+              Précision du positionnement géographique.
+              Valeurs : housenumber, street, locality, municipality
+          
+          - name: alias
+            description: Indicateur si l'adresse est un alias (0 ou 1)
+          
+          - name: nom_ld
+            description: Nom du lieu-dit (si applicable)
+          
+          - name: libelle_acheminement
+            description: Libellé d'acheminement postal
+          
+          - name: nom_afnor
+            description: Nom de voie normalisé AFNOR
+          
+          - name: source_position
+            description: Source des coordonnées géographiques
+          
+          - name: source_nom_voie
+            description: Source du nom de voie
+          
+          - name: certification_commune
+            description: Niveau de certification par la commune (0 ou 1)
+          
+          - name: cad_parcelles
+            description: Liste des parcelles cadastrales associées
+          
+          - name: departement
+            description: Code département (2 ou 3 chiffres)
