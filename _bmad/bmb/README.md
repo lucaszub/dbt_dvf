@@ -23,3 +23,4 @@ For complete documentation, architecture guides, and reference materials:
 ---
 
 Part of [BMad Method](https://github.com/bmadcode/bmad-method) v6.0
+t
