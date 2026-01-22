@@ -2,6 +2,87 @@ version: 2
 
 models:
   # =============================================================================
+  # DVF TRANSACTIONS - Données de ventes immobilières
+  # =============================================================================
+  - name: stg_dvf_transactions
+    description: |
+      **DVF Transactions - Couche Staging des ventes immobilières**
+
+      Données de ventes immobilières issues des Demandes de Valeurs Foncières (DVF).
+      Filtrées sur les ventes > 20 000 € avec valeur foncière non nulle.
+
+      **Source :** VALFONC_RAW.BRONZE.DVF_RAW_VARCHAR (Open Data DVF)
+
+      **Transformations appliquées :**
+      - Conversion DATE_MUTATION de DD/MM/YYYY vers DATE
+      - Conversion VALEUR_FONCIERE, SURFACE_REELLE_BATI, SURFACE_TERRAIN de texte vers NUMBER
+      - Filtrage : NATURE_MUTATION = 'Vente' et VALEUR_FONCIERE > 20000
+
+      **Grain :** Une ligne par transaction immobilière
+
+    columns:
+      - name: DATE_MUTATION
+        description: Date de la mutation immobilière (transaction)
+        tests:
+          - not_null
+
+      - name: VALEUR_FONCIERE
+        description: Montant de la transaction en euros
+        tests:
+          - not_null
+
+      - name: CODE_POSTAL
+        description: Code postal du bien (5 chiffres)
+
+      - name: COMMUNE
+        description: Nom de la commune du bien
+
+      - name: CODE_DEPARTEMENT
+        description: Code département (2-3 chiffres)
+
+  # =============================================================================
+  # BAN ADDRESSES - Adresses brutes de la Base Adresse Nationale
+  # =============================================================================
+  - name: stg_ban_addresses
+    description: |
+      **BAN Addresses - Couche Staging du référentiel adresses**
+
+      Adresses normalisées issues de la Base Adresse Nationale (BAN).
+      Filtrées sur les adresses avec ID, code postal et code INSEE valides.
+
+      **Source :** VALFONC_RAW.BRONZE.BAN_ADRESSES (data.gouv.fr)
+
+      **Transformations appliquées :**
+      - Normalisation UPPER + TRIM sur les champs texte
+      - Écrasement des espaces multiples (REGEXP_REPLACE)
+      - Conversion des coordonnées GPS et Lambert 93
+
+      **Grain :** Une ligne par adresse BAN unique
+
+    columns:
+      - name: ID
+        description: Identifiant unique BAN de l'adresse
+        tests:
+          - unique
+          - not_null
+
+      - name: CODE_POSTAL
+        description: Code postal (5 chiffres)
+        tests:
+          - not_null
+
+      - name: CODE_INSEE
+        description: Code INSEE de la commune (5 chiffres)
+        tests:
+          - not_null
+
+      - name: LONGITUDE
+        description: Longitude GPS en WGS84 (degrés décimaux)
+
+      - name: LATITUDE
+        description: Latitude GPS en WGS84 (degrés décimaux)
+
+  # =============================================================================
   # BAN ADDRESSES NORMALIZED - Préparation pour matching
   # =============================================================================
   - name: stg_ban_addresses_normalized

@@ -23,7 +23,7 @@ WITH clean AS (
     TRY_TO_NUMBER(REPLACE(SURFACE_TERRAIN, ',', '.'))           AS SURFACE_TERRAIN,
     TRY_TO_NUMBER(NOMBRE_PIECES_PRINCIPALES)                    AS NOMBRE_PIECES_PRINCIPALES,
 
-    /* Bruts pour analyse (tu peux les retirer si tu veux) */
+    /* Colonnes brutes conservées pour debug et analyse */
     NO_VOIE, BTQ, TYPE_DE_VOIE, CODE_VOIE, CODE_POSTAL, COMMUNE, VOIE,
     CODE_DEPARTEMENT, PREFIXE_DE_SECTION, SECTION, NO_PLAN, NO_VOLUME, TYPE_LOCAL
   FROM {{ ref('stg_dvf_transactions') }}
