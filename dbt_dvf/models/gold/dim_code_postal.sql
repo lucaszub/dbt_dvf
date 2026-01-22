@@ -6,7 +6,7 @@ WITH clean AS (
     UPPER(REGEXP_REPLACE(TRIM(COMMUNE), '\\s+', ' ')) AS COMMUNE_N,
     TRIM(CODE_DEPARTEMENT)                     AS CODE_DEPARTEMENT_N,
     UPPER(REGEXP_REPLACE(TRIM(VOIE), '\\s+', ' ')) AS VOIE_N
-  FROM {{ ref('dvf_silver') }}
+  FROM {{ ref('stg_dvf_transactions') }}
   WHERE CODE_POSTAL IS NOT NULL
 )
 SELECT

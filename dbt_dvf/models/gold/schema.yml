@@ -724,7 +724,7 @@ models:
   # =============================================================================
   # TABLE DE FAITS : MUTATIONS IMMOBILIÈRES
   # =============================================================================
-  - name: fact_mutation
+  - name: fct_mutation
     description: |
       **Table de Faits - Mutations immobilières DVF avec géocodage BAN**
 

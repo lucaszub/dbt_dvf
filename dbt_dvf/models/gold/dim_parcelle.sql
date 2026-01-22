@@ -5,7 +5,7 @@ WITH clean AS (
     UPPER(TRIM(SECTION))            AS SECTION_N,
     TRIM(NO_PLAN)                   AS NO_PLAN_N,
     TRIM(COALESCE(NO_VOLUME, ''))   AS NO_VOLUME_N   -- volume optionnel
-  FROM {{ ref('dvf_silver') }}
+  FROM {{ ref('stg_dvf_transactions') }}
 )
 SELECT
   /* Clé technique parcelle */

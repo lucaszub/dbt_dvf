@@ -26,7 +26,7 @@ WITH clean AS (
     /* Bruts pour analyse (tu peux les retirer si tu veux) */
     NO_VOIE, BTQ, TYPE_DE_VOIE, CODE_VOIE, CODE_POSTAL, COMMUNE, VOIE,
     CODE_DEPARTEMENT, PREFIXE_DE_SECTION, SECTION, NO_PLAN, NO_VOLUME, TYPE_LOCAL
-  FROM {{ ref('dvf_silver') }}
+  FROM {{ ref('stg_dvf_transactions') }}
   WHERE NATURE_MUTATION IN ('Vente')
 ),
 

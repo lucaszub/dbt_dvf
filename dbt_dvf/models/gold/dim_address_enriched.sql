@@ -35,7 +35,7 @@ WITH dvf_addresses_base AS (
     TRIM(CODE_POSTAL) AS CODE_POSTAL_N,
     UPPER(REGEXP_REPLACE(TRIM(COMMUNE), '\\s+', ' ')) AS COMMUNE_N,
     TRIM(CODE_DEPARTEMENT) AS CODE_DEPARTEMENT_N
-  FROM {{ ref('dvf_silver') }}
+  FROM {{ ref('stg_dvf_transactions') }}
   WHERE CODE_POSTAL IS NOT NULL
     AND COMMUNE IS NOT NULL
 ),
@@ -153,7 +153,7 @@ dvf_addresses_unique AS (
 ban_normalized AS (
   -- Import BAN normalisé
   SELECT *
-  FROM {{ ref('ban_addresses_normalized') }}
+  FROM {{ ref('stg_ban_addresses_normalized') }}
 ),
 
 -- ============================================================================
@@ -171,7 +171,6 @@ matched_exact AS (
     dvf.COMMUNE_N,
     dvf.CODE_DEPARTEMENT_N,
     dvf.NOM_VOIE_COMPLET,
-
     ban.BAN_ID,
     ban.CODE_INSEE,
     ban.ID_FANTOIR,

@@ -7,7 +7,7 @@ WITH clean AS (
     TRIM(CODE_POSTAL)                                            AS CODE_POSTAL_N,
     UPPER(REGEXP_REPLACE(TRIM(COMMUNE), '\\s+', ' '))            AS COMMUNE_N,
     TRIM(CODE_DEPARTEMENT)                                       AS CODE_DEPARTEMENT_N
-  FROM {{ ref('dvf_silver') }}
+  FROM {{ ref('stg_dvf_transactions') }}
 )
 SELECT
   /* Clé texte (HEX de 64 bits) – évite tout problème de précision dans Power BI */

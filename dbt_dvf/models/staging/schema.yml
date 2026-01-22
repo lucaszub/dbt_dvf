@@ -4,9 +4,9 @@ models:
   # =============================================================================
   # BAN ADDRESSES NORMALIZED - Préparation pour matching
   # =============================================================================
-  - name: ban_addresses_normalized
+  - name: stg_ban_addresses_normalized
     description: |
-      **BAN Addresses Normalized - Couche Silver optimisée pour le géocodage**
+      **BAN Addresses Normalized - Couche Staging optimisée pour le géocodage**
 
       Préparation des adresses BAN (Base Adresse Nationale) avec création de clés
       de matching multiples pour faciliter la jointure avec les adresses DVF.

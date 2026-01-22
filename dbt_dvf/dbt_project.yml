@@ -34,7 +34,7 @@ models:
   dvf:
     example:
       +materialized: view
-    silver:
+    staging:
       +materialized: view
       +database: VALFONC_ANALYTICS_DBT
       +schema: SILVER
