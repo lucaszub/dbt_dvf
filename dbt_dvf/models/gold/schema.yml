@@ -1042,6 +1042,8 @@ models:
               arguments:
                 to: ref('dim_address_enriched')
                 field: ADDRESS_ID
+              config:
+                where: "ADDRESS_MATCH_STRATEGY = 'MATCH_ADDRESS'"
 
       - name: COMMUNE_ID
         description: |
@@ -1350,5 +1352,305 @@ models:
           - Audit et traçabilité des chargements
           - Détection des nouvelles lignes depuis dernier run
           - Debugging pipelines dbt
+        tests:
+          - not_null
+
+  # =============================================================================
+  # MODÈLE AGRÉGÉ : KPIs NIVEAU COMMUNE
+  # =============================================================================
+  - name: gold_kpi_commune
+    description: |
+      **Modèle agrégé - KPIs par commune et année**
+
+      Table pré-agrégée contenant les indicateurs clés de performance du marché immobilier
+      calculés au niveau communal pour chaque année.
+
+      **🎯 Objectif :**
+      Fournir des données optimisées pour le drill-down commune de l'application Streamlit,
+      garantissant un chargement rapide (< 3s) avec coordonnées GPS pour la heatmap.
+
+      **📊 Métriques disponibles :**
+      - Prix médian au m² global par commune
+      - Prix médian au m² par type de bien (Appartement, Maison)
+      - Nombre de ventes par commune
+      - Centroids géographiques (LATITUDE, LONGITUDE) pour positionnement carte
+      - Indicateur de données suffisantes (HAS_SUFFICIENT_DATA)
+
+      **Grain :** Une ligne par couple (CODE_COMMUNE, ANNEE)
+
+      **Source :** Agrégation de fct_mutation avec enrichissement BAN
+
+    columns:
+      - name: CODE_COMMUNE
+        description: |
+          **Code INSEE de la commune** (5 caractères).
+
+          Identifiant officiel INSEE de la commune.
+          Exemples : "75056" (Paris), "13055" (Marseille), "69123" (Lyon).
+
+          Clé de jointure avec gold_kpi_code_postal pour le drill-down.
+        tests:
+          - not_null
+
+      - name: NOM_COMMUNE
+        description: |
+          **Nom de la commune** (libellé normalisé).
+
+          Issu de dim_commune, normalisé en majuscules.
+
+          Exemples : "PARIS", "MARSEILLE", "LYON".
+
+          **Utilisation :** Affichage lisible dans l'UI Streamlit (tooltips, labels).
+
+      - name: CODE_DEPARTEMENT
+        description: |
+          **Code département** (2 ou 3 caractères).
+
+          Permet le filtrage par département pour le drill-down depuis gold_kpi_departement.
+
+          Exemples : "75" (Paris), "13" (Bouches-du-Rhône), "971" (Guadeloupe).
+        tests:
+          - not_null
+
+      - name: ANNEE
+        description: |
+          **Année de la transaction**
+
+          Extraite de DATE_MUTATION via EXTRACT(YEAR FROM ...).
+          Permet l'analyse de l'évolution temporelle par commune.
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_M2
+        description: |
+          **Prix médian au m² de la commune** (tous types de biens confondus).
+
+          Calculé via MEDIAN(VALEUR_FONCIERE / SURFACE_REELLE_BATI) groupé par commune.
+
+          Filtre appliqué : Exclut les transactions sans surface ou avec surface nulle.
+
+          **Utilisation :** Coloration de la heatmap commune, affichage en tooltip.
+        tests:
+          - not_null
+          - prix_median_positif
+
+      - name: NB_VENTES
+        description: |
+          **Nombre total de ventes** dans la commune pour l'année.
+
+          Comptage de toutes les transactions après filtrage.
+
+          **Utilisation :** Volumétrie communale, validation seuil minimum (5 ventes).
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_APPARTEMENT
+        description: |
+          **Prix médian au m² pour les appartements** dans la commune.
+
+          Calculé via MEDIAN(CASE WHEN TYPE_LOCAL = 'APPARTEMENT' THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END).
+
+          NULL si aucune vente d'appartement dans la commune pour l'année.
+
+          **Utilisation :** Segmentation par type de bien, filtre Streamlit.
+        tests:
+          - prix_median_positif
+
+      - name: PRIX_MEDIAN_MAISON
+        description: |
+          **Prix médian au m² pour les maisons** dans la commune.
+
+          Calculé via MEDIAN(CASE WHEN TYPE_LOCAL = 'MAISON' THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END).
+
+          NULL si aucune vente de maison dans la commune pour l'année.
+
+          **Utilisation :** Segmentation par type de bien, filtre Streamlit.
+        tests:
+          - prix_median_positif
+
+      - name: LATITUDE_CENTROID
+        description: |
+          **Latitude du centroid géographique de la commune**.
+
+          Calculée via AVG(LATITUDE) des transactions de la commune.
+          COALESCE à 0 si aucune coordonnée disponible.
+
+          Coordonnée GPS en degrés décimaux (WGS84).
+
+          **Utilisation :** Positionnement des communes sur la carte (Pydeck heatmap).
+        tests:
+          - not_null
+
+      - name: LONGITUDE_CENTROID
+        description: |
+          **Longitude du centroid géographique de la commune**.
+
+          Calculée via AVG(LONGITUDE) des transactions de la commune.
+          COALESCE à 0 si aucune coordonnée disponible.
+
+          Coordonnée GPS en degrés décimaux (WGS84).
+
+          **Utilisation :** Positionnement des communes sur la carte (Pydeck heatmap).
+        tests:
+          - not_null
+
+      - name: HAS_SUFFICIENT_DATA
+        description: |
+          **Indicateur de données suffisantes** pour l'analyse.
+
+          TRUE si NB_VENTES >= 5, FALSE sinon.
+
+          Seuil de 5 transactions défini dans les spécifications UX (FR15).
+
+          **Utilisation Streamlit :**
+          - Colorer les zones insuffisantes en gris
+          - Bloquer le drill-down
+          - Afficher st.warning("Données insuffisantes")
+        tests:
+          - not_null
+
+  # =============================================================================
+  # MODÈLE AGRÉGÉ : KPIs NIVEAU CODE POSTAL
+  # =============================================================================
+  - name: gold_kpi_code_postal
+    description: |
+      **Modèle agrégé - KPIs par code postal et année**
+
+      Table pré-agrégée contenant les indicateurs clés de performance du marché immobilier
+      calculés au niveau code postal pour chaque année.
+
+      **🎯 Objectif :**
+      Fournir des données optimisées pour le drill-down code postal de l'application Streamlit,
+      garantissant un chargement rapide (< 3s) avec coordonnées GPS pour la heatmap.
+
+      **📊 Métriques disponibles :**
+      - Prix médian au m² global par code postal
+      - Prix médian au m² par type de bien (Appartement, Maison)
+      - Nombre de ventes par code postal
+      - Centroids géographiques (LATITUDE, LONGITUDE) pour positionnement carte
+      - Indicateur de données suffisantes (HAS_SUFFICIENT_DATA)
+
+      **Grain :** Une ligne par triplet (CODE_POSTAL, CODE_COMMUNE, ANNEE) - permet le filtrage fin par commune
+
+      **Source :** Agrégation de fct_mutation avec enrichissement BAN
+
+    columns:
+      - name: CODE_POSTAL
+        description: |
+          **Code postal** (5 caractères).
+
+          Code postal français.
+          Exemples : "75001" (Paris 1er), "13001" (Marseille 1er), "69001" (Lyon 1er).
+
+          Clé principale pour ce niveau d'agrégation.
+        tests:
+          - not_null
+
+      - name: CODE_COMMUNE
+        description: |
+          **Code INSEE de la commune** (5 caractères).
+
+          Fait partie de la clé de grain avec CODE_POSTAL et ANNEE.
+          Permet le filtrage fin par commune pour le drill-down depuis gold_kpi_commune.
+
+          Note : Un code postal peut couvrir plusieurs communes, donc il peut y avoir
+          plusieurs lignes par CODE_POSTAL+ANNEE (une par commune associée).
+
+          Peut être NULL si l'adresse n'a pas pu être enrichie avec le CODE_INSEE BAN.
+
+      - name: ANNEE
+        description: |
+          **Année de la transaction**
+
+          Extraite de DATE_MUTATION via EXTRACT(YEAR FROM ...).
+          Permet l'analyse de l'évolution temporelle par code postal.
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_M2
+        description: |
+          **Prix médian au m² du code postal** (tous types de biens confondus).
+
+          Calculé via MEDIAN(VALEUR_FONCIERE / SURFACE_REELLE_BATI) groupé par code postal.
+
+          Filtre appliqué : Exclut les transactions sans surface ou avec surface nulle.
+
+          **Utilisation :** Coloration de la heatmap code postal, affichage en tooltip.
+        tests:
+          - not_null
+          - prix_median_positif
+
+      - name: NB_VENTES
+        description: |
+          **Nombre total de ventes** dans le code postal pour l'année.
+
+          Comptage de toutes les transactions après filtrage.
+
+          **Utilisation :** Volumétrie par code postal, validation seuil minimum (5 ventes).
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_APPARTEMENT
+        description: |
+          **Prix médian au m² pour les appartements** dans le code postal.
+
+          Calculé via MEDIAN(CASE WHEN TYPE_LOCAL = 'APPARTEMENT' THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END).
+
+          NULL si aucune vente d'appartement dans le code postal pour l'année.
+
+          **Utilisation :** Segmentation par type de bien, filtre Streamlit.
+        tests:
+          - prix_median_positif
+
+      - name: PRIX_MEDIAN_MAISON
+        description: |
+          **Prix médian au m² pour les maisons** dans le code postal.
+
+          Calculé via MEDIAN(CASE WHEN TYPE_LOCAL = 'MAISON' THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END).
+
+          NULL si aucune vente de maison dans le code postal pour l'année.
+
+          **Utilisation :** Segmentation par type de bien, filtre Streamlit.
+        tests:
+          - prix_median_positif
+
+      - name: LATITUDE_CENTROID
+        description: |
+          **Latitude du centroid géographique du code postal**.
+
+          Calculée via AVG(LATITUDE) des transactions du code postal.
+          COALESCE à 0 si aucune coordonnée disponible.
+
+          Coordonnée GPS en degrés décimaux (WGS84).
+
+          **Utilisation :** Positionnement des codes postaux sur la carte (Pydeck heatmap).
+        tests:
+          - not_null
+
+      - name: LONGITUDE_CENTROID
+        description: |
+          **Longitude du centroid géographique du code postal**.
+
+          Calculée via AVG(LONGITUDE) des transactions du code postal.
+          COALESCE à 0 si aucune coordonnée disponible.
+
+          Coordonnée GPS en degrés décimaux (WGS84).
+
+          **Utilisation :** Positionnement des codes postaux sur la carte (Pydeck heatmap).
+        tests:
+          - not_null
+
+      - name: HAS_SUFFICIENT_DATA
+        description: |
+          **Indicateur de données suffisantes** pour l'analyse.
+
+          TRUE si NB_VENTES >= 5, FALSE sinon.
+
+          Seuil de 5 transactions défini dans les spécifications UX (FR15).
+
+          **Utilisation Streamlit :**
+          - Colorer les zones insuffisantes en gris
+          - Bloquer le drill-down
+          - Afficher st.warning("Données insuffisantes")
         tests:
           - not_null

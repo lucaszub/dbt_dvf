@@ -109,13 +109,14 @@ SELECT
 
 FROM clean c
 /* Adresse enrichie BAN – jointure sur 6 champs normalisés */
+/* COALESCE utilisé pour NO_VOIE et TYPE_DE_VOIE car souvent NULL (35% des transactions) */
 LEFT JOIN dim_address_enriched da
-  ON da.NO_VOIE          = c.NO_VOIE_N
- AND da.TYPE_DE_VOIE     = c.TYPE_DE_VOIE_N
- AND da.VOIE             = c.VOIE_N
- AND da.CODE_POSTAL      = c.CODE_POSTAL_N
- AND da.COMMUNE          = c.COMMUNE_N
- AND da.CODE_DEPARTEMENT = c.CODE_DEPARTEMENT_N
+  ON COALESCE(da.NO_VOIE, '')          = COALESCE(c.NO_VOIE_N, '')
+ AND COALESCE(da.TYPE_DE_VOIE, '')     = COALESCE(c.TYPE_DE_VOIE_N, '')
+ AND COALESCE(da.VOIE, '')             = COALESCE(c.VOIE_N, '')
+ AND da.CODE_POSTAL                    = c.CODE_POSTAL_N
+ AND da.COMMUNE                        = c.COMMUNE_N
+ AND da.CODE_DEPARTEMENT               = c.CODE_DEPARTEMENT_N
 
 /* Commune */
 LEFT JOIN dim_commune dc
