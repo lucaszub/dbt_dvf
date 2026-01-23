@@ -329,7 +329,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ['EXACT', 'SANS_TYPE', 'VOIE_SEULE', 'CODE_POSTAL', 'COMMUNE', 'NO_MATCH']
+              arguments:
+                values: ['EXACT', 'SANS_TYPE', 'VOIE_SEULE', 'CODE_POSTAL', 'COMMUNE', 'NO_MATCH']
 
       - name: MATCH_SCORE
         description: |
@@ -350,7 +351,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: [0, 30, 50, 70, 90, 100]
+              arguments:
+                values: [0, 30, 50, 70, 90, 100]
 
       - name: TYPE_POSITION
         description: |
@@ -641,7 +643,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: [0, 1]
+              arguments:
+                values: [0, 1]
 
       - name: CREATED_AT
         description: |
@@ -695,10 +698,10 @@ models:
           Libellé du type de local normalisé (UPPER + TRIM).
 
           Valeurs principales :
-          - Maison
-          - Appartement
-          - Local industriel. commercial. ou assimilé
-          - Dépendance
+          - MAISON
+          - APPARTEMENT
+          - LOCAL INDUSTRIEL. COMMERCIAL. OU ASSIMILÉ
+          - DÉPENDANCE
           - INCONNU (si valeur source NULL)
         tests:
           - not_null
@@ -719,7 +722,259 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ['DVF']
+              arguments:
+                values: 'DVF'
+
+  # =============================================================================
+  # MODÈLE AGRÉGÉ : KPIs NIVEAU FRANCE
+  # =============================================================================
+  - name: gold_kpi_france
+    description: |
+      **Modèle agrégé - KPIs au niveau France par année**
+
+      Table pré-agrégée contenant les indicateurs clés de performance du marché immobilier français
+      calculés au niveau national pour chaque année.
+
+      **🎯 Objectif :**
+      Fournir des données optimisées pour la vue France de l'application Streamlit,
+      garantissant un chargement rapide (< 5s) en évitant les agrégations à la volée sur fct_mutation.
+
+      **📊 Métriques disponibles :**
+      - Prix médian au m² global (tous types de biens confondus)
+      - Prix médian au m² par type de bien (Appartement, Maison)
+      - Nombre total de ventes
+      - Nombre de ventes par type de bien
+
+      **Grain :** Une ligne par année
+
+      **Source :** Agrégation de fct_mutation
+
+    columns:
+      - name: ANNEE
+        description: |
+          **Année de la transaction**
+
+          Extraite de DATE_MUTATION via EXTRACT(YEAR FROM ...).
+          Permet l'analyse de l'évolution temporelle des indicateurs.
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_M2
+        description: |
+          **Prix médian au m² national** (tous types de biens confondus).
+
+          Calculé via MEDIAN(VALEUR_FONCIERE / SURFACE_REELLE_BATI).
+
+          Filtre appliqué : Exclut les transactions sans surface ou avec surface nulle.
+
+          **Utilisation :** KPI principal pour la vue France, affichage en header.
+        tests:
+          - not_null
+          - prix_median_positif
+
+      - name: NB_VENTES
+        description: |
+          **Nombre total de ventes** au niveau France pour l'année.
+
+          Comptage de toutes les transactions après filtrage (VALEUR_FONCIERE et SURFACE_REELLE_BATI non nuls).
+
+          **Utilisation :** Volumétrie nationale, affichage en KPI header.
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_APPARTEMENT
+        description: |
+          **Prix médian au m² pour les appartements uniquement**.
+
+          Calculé via MEDIAN(CASE WHEN TYPE_LOCAL = 'APPARTEMENT' THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END).
+
+          NULL si aucune vente d'appartement pour l'année (rare).
+
+          **Utilisation :** Segmentation par type de bien, filtre Streamlit.
+        tests:
+          - prix_median_positif
+
+      - name: NB_VENTES_APPARTEMENT
+        description: |
+          **Nombre de ventes d'appartements** au niveau France.
+
+          Comptage conditionnel sur TYPE_LOCAL = 'APPARTEMENT'.
+
+          **Utilisation :** Volumétrie par type, comparaison marché appartements vs maisons.
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_MAISON
+        description: |
+          **Prix médian au m² pour les maisons uniquement**.
+
+          Calculé via MEDIAN(CASE WHEN TYPE_LOCAL = 'MAISON' THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END).
+
+          NULL si aucune vente de maison pour l'année (rare).
+
+          **Utilisation :** Segmentation par type de bien, filtre Streamlit.
+        tests:
+          - prix_median_positif
+
+      - name: NB_VENTES_MAISON
+        description: |
+          **Nombre de ventes de maisons** au niveau France.
+
+          Comptage conditionnel sur TYPE_LOCAL = 'MAISON'.
+
+          **Utilisation :** Volumétrie par type, comparaison marché appartements vs maisons.
+        tests:
+          - not_null
+
+  # =============================================================================
+  # MODÈLE AGRÉGÉ : KPIs NIVEAU DÉPARTEMENT
+  # =============================================================================
+  - name: gold_kpi_departement
+    description: |
+      **Modèle agrégé - KPIs par département et année**
+
+      Table pré-agrégée contenant les indicateurs clés de performance du marché immobilier
+      calculés au niveau départemental pour chaque année.
+
+      **🎯 Objectif :**
+      Fournir des données optimisées pour le drill-down département de l'application Streamlit,
+      garantissant un chargement rapide (< 3s) avec coordonnées GPS pour la heatmap.
+
+      **📊 Métriques disponibles :**
+      - Prix médian au m² global par département
+      - Prix médian au m² par type de bien (Appartement, Maison)
+      - Nombre de ventes par département
+      - Nombre de ventes par type de bien
+      - Centroids géographiques (LATITUDE, LONGITUDE) pour positionnement carte
+
+      **Grain :** Une ligne par couple (CODE_DEPARTEMENT, ANNEE)
+
+      **Source :** Agrégation de fct_mutation
+
+      **Enrichissement :** Jointure avec ref_departements pour obtenir NOM_DEPARTEMENT
+
+    columns:
+      - name: CODE_DEPARTEMENT
+        description: |
+          **Code département** (2 ou 3 caractères).
+
+          Exemples : "75" (Paris), "13" (Bouches-du-Rhône), "2A" (Corse-du-Sud), "971" (Guadeloupe).
+
+          Clé de jointure avec dim_commune et ref_departements.
+        tests:
+          - not_null
+
+      - name: NOM_DEPARTEMENT
+        description: |
+          **Nom du département** (libellé officiel).
+
+          Issu du seed ref_departements.csv via jointure sur CODE_DEPARTEMENT.
+
+          Fallback : Si département inconnu dans le seed, affiche CODE_DEPARTEMENT.
+
+          Exemples : "Paris", "Bouches-du-Rhône", "Corse-du-Sud".
+
+          **Utilisation :** Affichage lisible dans l'UI Streamlit (tooltips, labels).
+        tests:
+          - not_null
+
+      - name: ANNEE
+        description: |
+          **Année de la transaction**
+
+          Extraite de DATE_MUTATION via EXTRACT(YEAR FROM ...).
+          Permet l'analyse de l'évolution temporelle par département.
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_M2
+        description: |
+          **Prix médian au m² du département** (tous types de biens confondus).
+
+          Calculé via MEDIAN(VALEUR_FONCIERE / SURFACE_REELLE_BATI) groupé par département.
+
+          Filtre appliqué : Exclut les transactions sans surface ou avec surface nulle.
+
+          **Utilisation :** Coloration de la heatmap département, affichage en tooltip.
+        tests:
+          - not_null
+          - prix_median_positif
+
+      - name: NB_VENTES
+        description: |
+          **Nombre total de ventes** dans le département pour l'année.
+
+          Comptage de toutes les transactions après filtrage.
+
+          **Utilisation :** Volumétrie départementale, validation seuil minimum (5 ventes).
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_APPARTEMENT
+        description: |
+          **Prix médian au m² pour les appartements** dans le département.
+
+          Calculé via MEDIAN(CASE WHEN TYPE_LOCAL = 'APPARTEMENT' THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END).
+
+          NULL si aucune vente d'appartement dans le département pour l'année.
+
+          **Utilisation :** Segmentation par type de bien, filtre Streamlit.
+        tests:
+          - prix_median_positif
+
+      - name: NB_VENTES_APPARTEMENT
+        description: |
+          **Nombre de ventes d'appartements** dans le département.
+
+          Comptage conditionnel sur TYPE_LOCAL = 'APPARTEMENT'.
+        tests:
+          - not_null
+
+      - name: PRIX_MEDIAN_MAISON
+        description: |
+          **Prix médian au m² pour les maisons** dans le département.
+
+          Calculé via MEDIAN(CASE WHEN TYPE_LOCAL = 'MAISON' THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END).
+
+          NULL si aucune vente de maison dans le département pour l'année.
+
+          **Utilisation :** Segmentation par type de bien, filtre Streamlit.
+        tests:
+          - prix_median_positif
+
+      - name: NB_VENTES_MAISON
+        description: |
+          **Nombre de ventes de maisons** dans le département.
+
+          Comptage conditionnel sur TYPE_LOCAL = 'MAISON'.
+        tests:
+          - not_null
+
+      - name: LATITUDE_CENTROID
+        description: |
+          **Latitude du centroid géographique du département**.
+
+          Calculée via AVG(LATITUDE) des transactions du département, avec fallback
+          sur les coordonnées de référence du seed ref_departements si aucune transaction géocodée.
+
+          Coordonnée GPS en degrés décimaux (WGS84).
+
+          **Utilisation :** Positionnement des départements sur la carte France (Pydeck heatmap).
+        tests:
+          - not_null
+
+      - name: LONGITUDE_CENTROID
+        description: |
+          **Longitude du centroid géographique du département**.
+
+          Calculée via AVG(LONGITUDE) des transactions du département, avec fallback
+          sur les coordonnées de référence du seed ref_departements si aucune transaction géocodée.
+
+          Coordonnée GPS en degrés décimaux (WGS84).
+
+          **Utilisation :** Positionnement des départements sur la carte France (Pydeck heatmap).
+        tests:
+          - not_null
 
   # =============================================================================
   # TABLE DE FAITS : MUTATIONS IMMOBILIÈRES
@@ -784,8 +1039,9 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('dim_address_enriched')
-              field: ADDRESS_ID
+              arguments:
+                to: ref('dim_address_enriched')
+                field: ADDRESS_ID
 
       - name: COMMUNE_ID
         description: |
@@ -797,8 +1053,9 @@ models:
           Peut être NULL si commune absente ou non reconnue (cas marginal).
         tests:
           - relationships:
-              to: ref('dim_commune')
-              field: COMMUNE_ID
+              arguments:
+                to: ref('dim_commune')
+                field: COMMUNE_ID
 
       - name: PARCELLE_ID
         description: |
@@ -810,8 +1067,9 @@ models:
           Peut être NULL si identifiant cadastral incomplet ou absent.
         tests:
           - relationships:
-              to: ref('dim_parcelle')
-              field: PARCELLE_ID
+              arguments:
+                to: ref('dim_parcelle')
+                field: PARCELLE_ID
 
       - name: TYPE_LOCAL_ID
         description: |
@@ -822,8 +1080,9 @@ models:
           Peut être NULL si type non renseigné (rare, car fallback 'INCONNU' appliqué en dimension).
         tests:
           - relationships:
-              to: ref('dim_type_local')
-              field: TYPE_LOCAL_ID
+              arguments:
+                to: ref('dim_type_local')
+                field: TYPE_LOCAL_ID
 
       - name: CODE_POSTAL_ID
         description: |
@@ -835,8 +1094,9 @@ models:
           Peut être NULL si code postal absent ou mal formé.
         tests:
           - relationships:
-              to: ref('dim_code_postal')
-              field: CODE_POSTAL_ID
+              arguments:
+                to: ref('dim_code_postal')
+                field: CODE_POSTAL_ID
 
       # -------------------------------------------------------------------------
       # ENRICHISSEMENT GÉOGRAPHIQUE BAN
@@ -968,7 +1228,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ['MATCH_ADDRESS', 'FALLBACK_COMMUNE', 'NO_MATCH']
+              arguments:
+                values: ['MATCH_ADDRESS', 'FALLBACK_COMMUNE', 'NO_MATCH']
 
       # -------------------------------------------------------------------------
       # ATTRIBUTS DÉGÉNÉRÉS
@@ -1001,7 +1262,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ['Vente']
+              arguments:
+                values: ['Vente']
 
       # -------------------------------------------------------------------------
       # MESURES (Metrics)

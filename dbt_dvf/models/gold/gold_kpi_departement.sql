@@ -1,0 +1,76 @@
+-- Modèle gold_kpi_departement.sql
+-- KPIs agrégés par département et année
+-- Objectif : Fournir des données pré-agrégées pour le drill-down département de l'application Streamlit
+-- Performance cible : < 3s chargement
+
+WITH transactions AS (
+  SELECT
+    EXTRACT(YEAR FROM fm.DATE_MUTATION) AS ANNEE,
+    fm.VALEUR_FONCIERE,
+    fm.SURFACE_REELLE_BATI,
+    fm.LATITUDE,
+    fm.LONGITUDE,
+    dtl.TYPE_LOCAL,
+    dc.CODE_DEPARTEMENT
+  FROM {{ ref('fct_mutation') }} fm
+  LEFT JOIN {{ ref('dim_type_local') }} dtl
+    ON fm.TYPE_LOCAL_ID = dtl.TYPE_LOCAL_ID
+  LEFT JOIN {{ ref('dim_commune') }} dc
+    ON fm.COMMUNE_ID = dc.COMMUNE_ID
+  WHERE fm.VALEUR_FONCIERE IS NOT NULL
+    AND fm.SURFACE_REELLE_BATI IS NOT NULL
+    AND fm.SURFACE_REELLE_BATI > 0
+    AND dc.CODE_DEPARTEMENT IS NOT NULL
+),
+
+departement_kpis AS (
+  SELECT
+    CODE_DEPARTEMENT,
+    ANNEE,
+
+    -- Métriques globales
+    MEDIAN(VALEUR_FONCIERE / SURFACE_REELLE_BATI) AS PRIX_MEDIAN_M2,
+    COUNT(*) AS NB_VENTES,
+
+    -- Métriques par type de bien - Appartements
+    MEDIAN(
+      CASE WHEN TYPE_LOCAL = 'APPARTEMENT'
+      THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END
+    ) AS PRIX_MEDIAN_APPARTEMENT,
+
+    SUM(CASE WHEN TYPE_LOCAL = 'APPARTEMENT' THEN 1 ELSE 0 END) AS NB_VENTES_APPARTEMENT,
+
+    -- Métriques par type de bien - Maisons
+    MEDIAN(
+      CASE WHEN TYPE_LOCAL = 'MAISON'
+      THEN VALEUR_FONCIERE / SURFACE_REELLE_BATI END
+    ) AS PRIX_MEDIAN_MAISON,
+
+    SUM(CASE WHEN TYPE_LOCAL = 'MAISON' THEN 1 ELSE 0 END) AS NB_VENTES_MAISON,
+
+    -- Calcul des centroids géographiques
+    AVG(LATITUDE) AS LATITUDE_CENTROID,
+    AVG(LONGITUDE) AS LONGITUDE_CENTROID
+
+  FROM transactions
+  GROUP BY CODE_DEPARTEMENT, ANNEE
+)
+
+SELECT
+  dk.CODE_DEPARTEMENT,
+  COALESCE(rd.NOM_DEPARTEMENT, dk.CODE_DEPARTEMENT) AS NOM_DEPARTEMENT,
+  dk.ANNEE,
+  dk.PRIX_MEDIAN_M2,
+  dk.NB_VENTES,
+  dk.PRIX_MEDIAN_APPARTEMENT,
+  dk.NB_VENTES_APPARTEMENT,
+  dk.PRIX_MEDIAN_MAISON,
+  dk.NB_VENTES_MAISON,
+  COALESCE(dk.LATITUDE_CENTROID, rd.LATITUDE) AS LATITUDE_CENTROID,
+  COALESCE(dk.LONGITUDE_CENTROID, rd.LONGITUDE) AS LONGITUDE_CENTROID
+
+FROM departement_kpis dk
+LEFT JOIN {{ ref('ref_departements') }} rd
+  ON dk.CODE_DEPARTEMENT = rd.CODE_DEPARTEMENT
+
+ORDER BY dk.CODE_DEPARTEMENT, dk.ANNEE
