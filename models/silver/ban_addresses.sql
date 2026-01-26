@@ -1,3 +1,6 @@
+
+with base as (
+
 SELECT
     -- Identifiants
     TRIM("id") AS ID,
@@ -52,3 +55,14 @@ FROM {{ source('bronze', 'BAN_ADRESSES') }}
 WHERE "id" IS NOT NULL
   AND "code_postal" IS NOT NULL
   AND "code_insee" IS NOT NULL
+)
+SELECT
+   MD5(
+        CONCAT(
+            UPPER(TRIM(COALESCE(CODE_POSTAL, ''))), '|',
+            UPPER(TRIM(COALESCE({{ remove_accents('NOM_COMMUNE') }}, ''))), '|',
+            UPPER(TRIM(COALESCE(NUMERO, ''))), '|',
+            UPPER(TRIM(COALESCE(REGEXP_REPLACE(NOM_AFNOR, '^[^ ]+ ', ''), '')))
+        )
+        ) as join_key,
+    * from BASE
