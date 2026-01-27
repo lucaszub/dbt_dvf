@@ -1,11 +1,12 @@
 SELECT
     DVF.join_key,
+    DVF.DATE_MUTATION,
     --BA.ADRESSE as ADRESSE_BAN,
     DTL.type_local_sk,
     dvf.nombre_pieces_principales,
     dvf.surface_terrain,
     DVF.VALEUR_FONCIERE,
-    DVF.DATE_MUTATION,
+    
     BA.LATITUDE,
     BA.LONGITUDE
 FROM 

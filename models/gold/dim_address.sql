@@ -1,13 +1,11 @@
- SELECT dvf.JOIN_KEY,
-        CONCAT(NUMERO, ' ', NOM_AFNOR, ' ', dvf.CODE_POSTAL, ' ', {{ remove_accents('NOM_COMMUNE') }}) AS ADRESSE,
-        NOM_AFNOR,
-        {{ remove_accents('NOM_AFNOR') }}, 
-        NUMERO,
-        dvf.CODE_POSTAL,
-        {{ remove_accents('NOM_COMMUNE') }} as NOM_COMMUNE,
-        dvf.CODE_DEPARTEMENT,
-        LATITUDE,
-        LONGITUDE
-    FROM {{ ref('ban_addresses') }} as ba
-    left join {{ ref('dvf_silver') }} as dvf
-    on ba.join_key = dvf.join_key
+SELECT 
+    ba.join_key,
+    CONCAT(ba.NUMERO, ' ', ba.NOM_AFNOR, ' ', ba.CODE_POSTAL, ' ', {{ remove_accents('ba.NOM_COMMUNE') }}) AS ADRESSE,
+    {{ remove_accents('ba.NOM_AFNOR') }} AS NOM_AFNOR,
+    ba.NUMERO,
+    ba.CODE_DEPARTEMENT,
+    ba.CODE_POSTAL,
+    {{ remove_accents('ba.NOM_COMMUNE') }} AS NOM_COMMUNE,
+    ba.LATITUDE,
+    ba.LONGITUDE
+FROM {{ ref('ban_addresses') }} AS ba

@@ -7,3 +7,4 @@ FROM (
     FROM {{ ref('dvf_silver') }}
     WHERE TYPE_LOCAL IS NOT NULL
 )
+order by type_local_sk

@@ -1,619 +1,619 @@
-version: 2
-
-models:
-  # =============================================================================
-  # DIMENSION : ADRESSES
-  # =============================================================================
-  - name: dim_address
-    description: |
-      **Dimension Adresse - Référentiel des adresses normalisées**
-
-      Table de dimension contenant toutes les adresses uniques issues des transactions DVF.
-
-      **Processus de construction :**
-      1. Normalisation des composants d'adresse (trim, upper, suppression espaces multiples)
-      2. Génération d'une clé technique (HASH) basée sur les 6 composants
-      3. Déduplication stricte via QUALIFY ROW_NUMBER()
-
-      **Utilisation :**
-      - Jointure avec fact_mutation sur ADDRESS_ID
-      - Permet analyses géographiques et reporting par adresse
-      - Format de clé HEX (64 bits) compatible Power BI (pas de problème de précision)
-
-      **Grain :** Une ligne par adresse unique (NO_VOIE + TYPE_DE_VOIE + VOIE + CODE_POSTAL + COMMUNE + CODE_DEPARTEMENT)
-
-    columns:
-      - name: ADDRESS_ID
-        description: |
-          **Clé primaire technique** - Identifiant unique de l'adresse.
-
-          Générée via HASH des 6 composants normalisés, convertie en HEX (format texte XXXXXXXXXXXXXXXX).
-          Ce format évite tout problème de précision numérique dans Power BI.
-
-          Formule : HASH(NO_VOIE || TYPE_DE_VOIE || VOIE || CODE_POSTAL || COMMUNE || CODE_DEPARTEMENT)
-        tests:
-          - unique
-          - not_null
-
-      - name: NO_VOIE
-        description: |
-          Numéro de voie normalisé (UPPER + TRIM).
-          Exemple : "123", "45 BIS"
-
-      - name: TYPE_DE_VOIE
-        description: |
-          Type de voie normalisé (UPPER + TRIM).
-          Exemple : RUE, AVENUE, BOULEVARD, CHEMIN, IMPASSE, PLACE
-
-      - name: VOIE
-        description: |
-          Nom de la voie normalisé (UPPER + TRIM + espaces multiples écrasés).
-          Exemple : "VICTOR HUGO", "DE LA REPUBLIQUE"
-
-      - name: CODE_POSTAL
-        description: |
-          Code postal normalisé (TRIM).
-          Format : 5 chiffres pour métropole, codes spéciaux pour DOM-TOM.
-        tests:
-          - not_null
-
-      - name: COMMUNE
-        description: |
-          Nom de la commune normalisé (UPPER + TRIM + espaces multiples écrasés).
-          Exemple : "PARIS", "MARSEILLE", "SAINT ETIENNE"
-        tests:
-          - not_null
-
-      - name: CODE_DEPARTEMENT
-        description: |
-          Code département normalisé (TRIM).
-          Format : 2 chiffres (métropole) ou 3 chiffres (DOM-TOM).
-          Exemple : "75", "13", "971"
-        tests:
-          - not_null
-
-      - name: ADDRESS
-        description: |
-          Libellé complet de l'adresse, lisible par un humain.
-          Concaténation : NO_VOIE + TYPE_DE_VOIE + VOIE + CODE_POSTAL + COMMUNE
-
-          Exemple : "123 RUE VICTOR HUGO 75001 PARIS"
-
-      - name: CREATED_AT
-        description: |
-          Horodatage de création de l'enregistrement dans la dimension.
-          Alimenté via CURRENT_TIMESTAMP() lors de l'exécution dbt.
-        tests:
-          - not_null
-
-  # =============================================================================
-  # DIMENSION : CODES POSTAUX
-  # =============================================================================
-  - name: dim_code_postal
-    description: |
-      **Dimension Code Postal - Référentiel géographique**
-
-      Table de dimension contenant les codes postaux uniques avec leurs attributs géographiques.
-
-      **Processus de construction :**
-      1. Normalisation (trim, upper, suppression espaces multiples)
-      2. Clé technique basée sur CP + département
-      3. Déduplication : un code postal peut couvrir plusieurs communes, on garde la première par ordre alphabétique
-
-      **Utilisation :**
-      - Jointure avec fact_mutation sur CODE_POSTAL_ID
-      - Enrichissement cartographique possible (LATITUDE/LONGITUDE en placeholder)
-      - Agrégation géographique niveau code postal
-
-      **Grain :** Une ligne par couple unique (CODE_POSTAL, CODE_DEPARTEMENT)
-
-    columns:
-      - name: CODE_POSTAL_ID
-        description: |
-          **Clé primaire technique** - Identifiant unique du code postal.
-
-          Générée via HASH(CODE_POSTAL || CODE_DEPARTEMENT), format HEX.
-          Garantit l'unicité même si un code postal existe dans plusieurs départements.
-        tests:
-          - unique
-          - not_null
-
-      - name: CODE_POSTAL
-        description: |
-          Code postal normalisé (TRIM).
-          5 chiffres en général.
-        tests:
-          - not_null
-
-      - name: COMMUNE
-        description: |
-          Nom de la commune principale associée à ce code postal (normalisé).
-          En cas de multi-communes, la première par ordre alphabétique est retenue.
-
-      - name: CODE_DEPARTEMENT
-        description: |
-          Code département normalisé (TRIM).
-          Lien avec la dimension commune et adresse.
-        tests:
-          - not_null
-
-      - name: VOIE
-        description: |
-          Nom d'une voie représentative pour ce code postal (normalisé).
-          Information contextuelle, peut varier selon les données sources.
-
-      - name: CREATED_AT
-        description: |
-          Horodatage de création de l'enregistrement.
-          Alimenté via CURRENT_TIMESTAMP().
-        tests:
-          - not_null
-
-  # =============================================================================
-  # DIMENSION : COMMUNES
-  # =============================================================================
-  - name: dim_commune
-    description: |
-      **Dimension Commune - Référentiel administratif**
-
-      Table de dimension contenant toutes les communes uniques issues des adresses.
-
-      **Processus de construction :**
-      1. Source : dim_address (adresses déjà normalisées)
-      2. Extraction COMMUNE + CODE_DEPARTEMENT
-      3. Génération clé technique via HASH
-      4. Déduplication stricte
-
-      **Utilisation :**
-      - Jointure avec fact_mutation sur COMMUNE_ID
-      - Analyses géographiques niveau commune
-      - Reporting par collectivité territoriale
-
-      **Grain :** Une ligne par couple unique (COMMUNE, CODE_DEPARTEMENT)
-
-    columns:
-      - name: COMMUNE_ID
-        description: |
-          **Clé primaire technique** - Identifiant unique de la commune.
-
-          Générée via HASH(COMMUNE || CODE_DEPARTEMENT).
-          Le département est nécessaire car certaines communes ont le même nom dans différents départements.
-          Exemple : "Saint-Denis" existe en Seine-Saint-Denis (93) et à La Réunion (974).
-        tests:
-          - unique
-          - not_null
-
-      - name: COMMUNE
-        description: |
-          Nom de la commune normalisé (UPPER + TRIM).
-          Exemple : "PARIS", "LYON", "MARSEILLE"
-        tests:
-          - not_null
-
-      - name: CODE_DEPARTEMENT
-        description: |
-          Code département normalisé (TRIM).
-          Permet de distinguer les homonymes.
-        tests:
-          - not_null
-
-      - name: CREATED_AT
-        description: |
-          Horodatage de création de l'enregistrement.
-          Alimenté via CURRENT_TIMESTAMP().
-        tests:
-          - not_null
-
-  # =============================================================================
-  # DIMENSION : PARCELLES CADASTRALES
-  # =============================================================================
-  - name: dim_parcelle
-    description: |
-      **Dimension Parcelle - Référentiel cadastral**
-
-      Table de dimension contenant les parcelles cadastrales uniques.
-
-      **Identification cadastrale :**
-      Une parcelle est identifiée par :
-      - PREFIXE_DE_SECTION (optionnel)
-      - SECTION (obligatoire)
-      - NO_PLAN (obligatoire)
-      - NO_VOLUME (optionnel, pour copropriétés)
-
-      **Processus de construction :**
-      1. Normalisation (trim, upper)
-      2. Génération clé technique via HASH des 4 composants
-      3. Flag qualité IS_PARTIAL si SECTION ou NO_PLAN manquants
-      4. Déduplication stricte
-
-      **Utilisation :**
-      - Jointure avec fact_mutation sur PARCELLE_ID
-      - Analyses foncières et cadastrales
-      - Suivi des mutations par parcelle
-
-      **Grain :** Une ligne par combinaison unique (PREFIXE_DE_SECTION, SECTION, NO_PLAN, NO_VOLUME)
-
-    columns:
-      - name: PARCELLE_ID
-        description: |
-          **Clé primaire technique** - Identifiant unique de la parcelle cadastrale.
-
-          Générée via HASH des 4 composants cadastraux normalisés.
-          Permet de suivre les mutations multiples sur une même parcelle.
-        tests:
-          - unique
-          - not_null
-
-      - name: PREFIXE_DE_SECTION
-        description: |
-          Préfixe de la section cadastrale (normalisé UPPER + TRIM).
-          Optionnel, peut être NULL.
-          Utilisé pour subdiviser géographiquement les sections.
-
-      - name: SECTION
-        description: |
-          Section cadastrale (normalisée UPPER + TRIM).
-          Obligatoire pour identifier une parcelle.
-          Format : généralement 2 caractères (ex : "AB", "01").
-
-      - name: NO_PLAN
-        description: |
-          Numéro de plan cadastral (normalisé TRIM).
-          Obligatoire, identifie la parcelle au sein de la section.
-          Format : numérique (ex : "123", "0045").
-
-      - name: NO_VOLUME
-        description: |
-          Numéro de volume (normalisé TRIM).
-          Optionnel, utilisé pour les lots en copropriété.
-          NULL si parcelle simple (non divisée en volumes).
-
-      - name: IS_PARTIAL
-        description: |
-          **Flag qualité** - Indicateur de parcelle incomplète.
-
-          Valeurs :
-          - 0 : Parcelle complète (SECTION et NO_PLAN renseignés)
-          - 1 : Parcelle incomplète (SECTION ou NO_PLAN manquants)
-
-          Permet de filtrer les parcelles mal identifiées pour des analyses de qualité.
-        tests:
-          - not_null
-          - accepted_values:
-              values: [0, 1]
-
-      - name: CREATED_AT
-        description: |
-          Horodatage de création de l'enregistrement.
-          Alimenté via CURRENT_TIMESTAMP().
-        tests:
-          - not_null
-
-  # =============================================================================
-  # DIMENSION : TYPES DE LOCAUX
-  # =============================================================================
-  - name: dim_type_local
-    description: |
-      **Dimension Type de Local - Référentiel typologique**
-
-      Table de dimension contenant les types de biens immobiliers.
-
-      **Valeurs courantes :**
-      - Maison
-      - Appartement
-      - Local industriel. commercial. ou assimilé
-      - Dépendance
-      - INCONNU (valeur par défaut si NULL)
-
-      **Processus de construction :**
-      1. Normalisation (UPPER + TRIM)
-      2. Remplacement NULL → 'INCONNU'
-      3. Génération clé technique via HASH
-      4. Déduplication stricte
-
-      **Utilisation :**
-      - Jointure avec fact_mutation sur TYPE_LOCAL_ID
-      - Segmentation des analyses par type de bien
-      - Reporting marché résidentiel vs commercial
-
-      **Grain :** Une ligne par type de local unique
-
-    columns:
-      - name: TYPE_LOCAL_ID
-        description: |
-          **Clé primaire technique** - Identifiant unique du type de local.
-
-          Générée via HASH(TYPE_LOCAL).
-          La valeur 'INCONNU' est utilisée comme fallback pour les types NULL.
-        tests:
-          - unique
-          - not_null
-
-      - name: TYPE_LOCAL
-        description: |
-          Libellé du type de local normalisé (UPPER + TRIM).
-
-          Valeurs principales :
-          - Maison
-          - Appartement
-          - Local industriel. commercial. ou assimilé
-          - Dépendance
-          - INCONNU (si valeur source NULL)
-        tests:
-          - not_null
-
-      - name: CREATED_AT
-        description: |
-          Horodatage de création de l'enregistrement.
-          Alimenté via CURRENT_TIMESTAMP().
-        tests:
-          - not_null
-
-      - name: SOURCE_SYSTEM
-        description: |
-          Système source ayant alimenté cette dimension.
-          Valeur fixe : 'DVF' (Demandes de Valeurs Foncières).
-
-          Permet de tracer l'origine des données pour des enrichissements futurs.
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['DVF']
-
-  # =============================================================================
-  # TABLE DE FAITS : MUTATIONS IMMOBILIÈRES
-  # =============================================================================
-  - name: fact_mutation
-    description: |
-      **Table de Faits - Mutations immobilières DVF**
-
-      Table centrale du modèle en étoile contenant toutes les transactions immobilières (ventes).
-
-      **Architecture :**
-      - Schéma en étoile (star schema)
-      - Clés étrangères vers 5 dimensions : address, commune, parcelle, type_local, code_postal
-      - Mesures : valeur foncière, surfaces, nombre de pièces
-      - Attributs dégénérés : date mutation, nature mutation
-
-      **Stratégie de jointure ADDRESS :**
-      La colonne ADDRESS_MATCH_STRATEGY trace la qualité du lien adresse :
-      - 'MATCH_ADDRESS' : jointure parfaite sur 6 champs (meilleure qualité)
-      - 'FALLBACK_COMMUNE' : fallback sur commune uniquement (adresse incomplète)
-      - 'NO_MATCH' : aucun match (cas marginal, nécessite investigation)
-
-      Si aucune adresse exacte n'est trouvée, un ADDRESS_ID de secours est généré via
-      HASH('UNKNOWN|' || commune || département).
-
-      **Processus de construction :**
-      1. Nettoyage et normalisation des données silver
-      2. Jointures LEFT avec les 5 dimensions
-      3. Application stratégie de fallback pour ADDRESS_ID
-      4. Calcul du flag ADDRESS_MATCH_STRATEGY
-
-      **Utilisation :**
-      - Analyses du marché immobilier (prix au m², évolution temporelle)
-      - Reporting géographique multi-niveaux (adresse, commune, département, CP)
-      - Études par typologie de biens
-      - Analyses cadastrales et foncières
-
-      **Grain :** Une ligne par transaction immobilière (mutation)
-
-    columns:
-      # -------------------------------------------------------------------------
-      # CLÉS ÉTRANGÈRES (Foreign Keys)
-      # -------------------------------------------------------------------------
-      - name: ADDRESS_ID
-        description: |
-          **Clé étrangère** vers dim_address.
-
-          Lien vers l'adresse normalisée du bien.
-
-          **Stratégie de jointure avec fallback :**
-          1. Tentative de match sur 6 champs normalisés (NO_VOIE, TYPE_DE_VOIE, VOIE, CP, COMMUNE, DEPT)
-          2. Si échec : génération d'un ADDRESS_ID de secours via HASH('UNKNOWN|' || commune || département)
-          3. Garantit l'absence de NULL (requis pour intégrité référentielle Power BI)
-
-          Voir ADDRESS_MATCH_STRATEGY pour tracer la qualité du lien.
-        tests:
-          - not_null
-          - relationships:
-              to: ref('dim_address')
-              field: ADDRESS_ID
-
-      - name: COMMUNE_ID
-        description: |
-          **Clé étrangère** vers dim_commune.
-
-          Lien vers la commune du bien.
-          Jointure sur COMMUNE + CODE_DEPARTEMENT normalisés.
-
-          Peut être NULL si commune absente ou non reconnue (cas marginal).
-        tests:
-          - relationships:
-              to: ref('dim_commune')
-              field: COMMUNE_ID
-
-      - name: PARCELLE_ID
-        description: |
-          **Clé étrangère** vers dim_parcelle.
-
-          Lien vers la parcelle cadastrale.
-          Jointure sur PREFIXE_DE_SECTION + SECTION + NO_PLAN + NO_VOLUME.
-
-          Peut être NULL si identifiant cadastral incomplet ou absent.
-        tests:
-          - relationships:
-              to: ref('dim_parcelle')
-              field: PARCELLE_ID
-
-      - name: TYPE_LOCAL_ID
-        description: |
-          **Clé étrangère** vers dim_type_local.
-
-          Lien vers le type de bien (Maison, Appartement, etc.).
-
-          Peut être NULL si type non renseigné (rare, car fallback 'INCONNU' appliqué en dimension).
-        tests:
-          - relationships:
-              to: ref('dim_type_local')
-              field: TYPE_LOCAL_ID
-
-      - name: CODE_POSTAL_ID
-        description: |
-          **Clé étrangère** vers dim_code_postal.
-
-          Lien vers le code postal.
-          Jointure sur CODE_POSTAL + CODE_DEPARTEMENT.
-
-          Peut être NULL si code postal absent ou mal formé.
-        tests:
-          - relationships:
-              to: ref('dim_code_postal')
-              field: CODE_POSTAL_ID
-
-      # -------------------------------------------------------------------------
-      # TRAÇABILITÉ QUALITÉ
-      # -------------------------------------------------------------------------
-      - name: ADDRESS_MATCH_STRATEGY
-        description: |
-          **Indicateur de qualité du lien adresse**
-
-          Valeurs possibles :
-          - 'MATCH_ADDRESS' : Jointure réussie sur adresse complète (6 champs)
-            → Meilleure qualité, géolocalisation précise possible
-
-          - 'FALLBACK_COMMUNE' : Adresse incomplète, fallback sur commune uniquement
-            → Qualité moyenne, géolocalisation au niveau commune
-
-          - 'NO_MATCH' : Aucun match (ni adresse ni commune)
-            → Qualité faible, nécessite investigation des données sources
-
-          **Utilisation :**
-          - Filtrer les analyses sur MATCH_ADDRESS pour garantir précision géographique
-          - Identifier les lignes nécessitant enrichissement ou correction
-          - Mesurer la qualité globale du référentiel adresse
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['MATCH_ADDRESS', 'FALLBACK_COMMUNE', 'NO_MATCH']
-
-      # -------------------------------------------------------------------------
-      # ATTRIBUTS DÉGÉNÉRÉS
-      # -------------------------------------------------------------------------
-      - name: DATE_MUTATION
-        description: |
-          **Date de la mutation** (transaction immobilière).
-
-          Format : DATE (YYYY-MM-DD)
-          Source : convertie depuis format texte DD/MM/YYYY.
-
-          **Utilisation :**
-          - Analyses temporelles (évolutions prix, volumétrie)
-          - Segmentation par période (mois, trimestre, année)
-          - Calcul d'indicateurs glissants (moyenne mobile 12 mois, etc.)
-        tests:
-          - not_null
-
-      - name: NATURE_MUTATION
-        description: |
-          Nature juridique de la mutation.
-
-          Valeur unique dans cette table : 'Vente'
-          (Le filtre est appliqué en amont dans dvf_silver et fact_mutation)
-
-          Autres valeurs possibles dans les données brutes (non incluses ici) :
-          - Échange
-          - Adjudication
-          - Expropriation
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['Vente']
-
-      # -------------------------------------------------------------------------
-      # MESURES (Metrics)
-      # -------------------------------------------------------------------------
-      - name: VALEUR_FONCIERE
-        description: |
-          **Montant de la transaction** en euros (€).
-
-          Valeur numérique convertie depuis format texte (virgule → point).
-
-          **Filtre appliqué en amont :** > 20 000 €
-
-          **Utilisation :**
-          - Analyses de prix (médiane, moyenne, distribution)
-          - Calcul prix au m² (VALEUR_FONCIERE / SURFACE_REELLE_BATI)
-          - Segmentation par tranches de prix
-          - Détection outliers (valeurs aberrantes)
-
-          **Attention :** Peut inclure plusieurs biens dans une même transaction.
-
-      - name: SURFACE_REELLE_BATI
-        description: |
-          **Surface habitable du bien** en m².
-
-          Surface réelle du bâti (loi Carrez pour copropriétés).
-          Valeur numérique convertie depuis format texte.
-
-          **Utilisation :**
-          - Calcul prix au m² habitable
-          - Segmentation par taille de bien
-          - Analyses de marché par typologie
-
-          Peut être NULL pour :
-          - Terrains nus (pas de bâti)
-          - Données incomplètes
-
-      - name: NOMBRE_PIECES_PRINCIPALES
-        description: |
-          **Nombre de pièces principales** du bien.
-
-          Définition : chambres, salon, salle à manger, bureau.
-          Exclut : cuisine, salle de bains, WC, couloirs, dégagements.
-
-          Valeur numérique convertie via TRY_TO_NUMBER (NULL si conversion échoue).
-
-          **Utilisation :**
-          - Typologie T1, T2, T3, T4, T5+ (T = nombre de pièces hors cuisine)
-          - Analyses par segment (studio, 2 pièces, 3 pièces, etc.)
-          - Calcul prix par pièce
-
-          Peut être NULL pour :
-          - Locaux commerciaux ou industriels
-          - Terrains nus
-          - Données manquantes
-
-      - name: SURFACE_TERRAIN
-        description: |
-          **Surface du terrain** en m².
-
-          Surface cadastrale de la parcelle.
-          Valeur numérique convertie depuis format texte.
-
-          **Utilisation :**
-          - Analyses foncières
-          - Calcul prix au m² de terrain
-          - Segmentation maisons avec/sans terrain
-          - Études densité urbaine
-
-          Peut être NULL pour :
-          - Appartements (pas de terrain privatif)
-          - Données incomplètes
-
-          **Note :** Pour une maison, SURFACE_TERRAIN > SURFACE_REELLE_BATI (terrain inclut jardin, parking, etc.)
-
-      # -------------------------------------------------------------------------
-      # MÉTADONNÉES TECHNIQUES
-      # -------------------------------------------------------------------------
-      - name: CREATED_AT
-        description: |
-          Horodatage de création de l'enregistrement dans la fact table.
-          Alimenté via CURRENT_TIMESTAMP() lors de l'exécution dbt.
-
-          **Utilisation :**
-          - Audit et traçabilité des chargements
-          - Détection des nouvelles lignes depuis dernier run
-          - Debugging pipelines dbt
-        tests:
-          - not_null
+# version: 2
+
+# models:
+#   # =============================================================================
+#   # DIMENSION : ADRESSES
+#   # =============================================================================
+#   # - name: dim_address
+#   #   description: |
+#   #     **Dimension Adresse - Référentiel des adresses normalisées**
+
+#   #     Table de dimension contenant toutes les adresses uniques issues des transactions DVF.
+
+#   #     **Processus de construction :**
+#   #     1. Normalisation des composants d'adresse (trim, upper, suppression espaces multiples)
+#   #     2. Génération d'une clé technique (HASH) basée sur les 6 composants
+#   #     3. Déduplication stricte via QUALIFY ROW_NUMBER()
+
+#   #     **Utilisation :**
+#   #     - Jointure avec fact_mutation sur ADDRESS_ID
+#   #     - Permet analyses géographiques et reporting par adresse
+#   #     - Format de clé HEX (64 bits) compatible Power BI (pas de problème de précision)
+
+#   #     **Grain :** Une ligne par adresse unique (NO_VOIE + TYPE_DE_VOIE + VOIE + CODE_POSTAL + COMMUNE + CODE_DEPARTEMENT)
+
+#   #   columns:
+#   #     - name: ADDRESS_ID
+#   #       description: |
+#   #         **Clé primaire technique** - Identifiant unique de l'adresse.
+
+#   #         Générée via HASH des 6 composants normalisés, convertie en HEX (format texte XXXXXXXXXXXXXXXX).
+#   #         Ce format évite tout problème de précision numérique dans Power BI.
+
+#   #         Formule : HASH(NO_VOIE || TYPE_DE_VOIE || VOIE || CODE_POSTAL || COMMUNE || CODE_DEPARTEMENT)
+#   #       tests:
+#   #         - unique
+#   #         - not_null
+
+#   #     - name: NO_VOIE
+#   #       description: |
+#   #         Numéro de voie normalisé (UPPER + TRIM).
+#   #         Exemple : "123", "45 BIS"
+
+#   #     - name: TYPE_DE_VOIE
+#   #       description: |
+#   #         Type de voie normalisé (UPPER + TRIM).
+#   #         Exemple : RUE, AVENUE, BOULEVARD, CHEMIN, IMPASSE, PLACE
+
+#   #     - name: VOIE
+#   #       description: |
+#   #         Nom de la voie normalisé (UPPER + TRIM + espaces multiples écrasés).
+#   #         Exemple : "VICTOR HUGO", "DE LA REPUBLIQUE"
+
+#   #     - name: CODE_POSTAL
+#   #       description: |
+#   #         Code postal normalisé (TRIM).
+#   #         Format : 5 chiffres pour métropole, codes spéciaux pour DOM-TOM.
+#   #       tests:
+#   #         - not_null
+
+#   #     - name: COMMUNE
+#   #       description: |
+#   #         Nom de la commune normalisé (UPPER + TRIM + espaces multiples écrasés).
+#   #         Exemple : "PARIS", "MARSEILLE", "SAINT ETIENNE"
+#   #       tests:
+#   #         - not_null
+
+#   #     - name: CODE_DEPARTEMENT
+#   #       description: |
+#   #         Code département normalisé (TRIM).
+#   #         Format : 2 chiffres (métropole) ou 3 chiffres (DOM-TOM).
+#   #         Exemple : "75", "13", "971"
+#   #       tests:
+#   #         - not_null
+
+#   #     - name: ADDRESS
+#   #       description: |
+#   #         Libellé complet de l'adresse, lisible par un humain.
+#   #         Concaténation : NO_VOIE + TYPE_DE_VOIE + VOIE + CODE_POSTAL + COMMUNE
+
+#   #         Exemple : "123 RUE VICTOR HUGO 75001 PARIS"
+
+#   #     - name: CREATED_AT
+#   #       description: |
+#   #         Horodatage de création de l'enregistrement dans la dimension.
+#   #         Alimenté via CURRENT_TIMESTAMP() lors de l'exécution dbt.
+#   #       tests:
+#   #         - not_null
+
+#   # =============================================================================
+#   # DIMENSION : CODES POSTAUX
+#   # =============================================================================
+#   - name: dim_code_postal
+#     description: |
+#       **Dimension Code Postal - Référentiel géographique**
+
+#       Table de dimension contenant les codes postaux uniques avec leurs attributs géographiques.
+
+#       **Processus de construction :**
+#       1. Normalisation (trim, upper, suppression espaces multiples)
+#       2. Clé technique basée sur CP + département
+#       3. Déduplication : un code postal peut couvrir plusieurs communes, on garde la première par ordre alphabétique
+
+#       **Utilisation :**
+#       - Jointure avec fact_mutation sur CODE_POSTAL_ID
+#       - Enrichissement cartographique possible (LATITUDE/LONGITUDE en placeholder)
+#       - Agrégation géographique niveau code postal
+
+#       **Grain :** Une ligne par couple unique (CODE_POSTAL, CODE_DEPARTEMENT)
+
+#     columns:
+#       - name: CODE_POSTAL_ID
+#         description: |
+#           **Clé primaire technique** - Identifiant unique du code postal.
+
+#           Générée via HASH(CODE_POSTAL || CODE_DEPARTEMENT), format HEX.
+#           Garantit l'unicité même si un code postal existe dans plusieurs départements.
+#         tests:
+#           - unique
+#           - not_null
+
+#       - name: CODE_POSTAL
+#         description: |
+#           Code postal normalisé (TRIM).
+#           5 chiffres en général.
+#         tests:
+#           - not_null
+
+#       - name: COMMUNE
+#         description: |
+#           Nom de la commune principale associée à ce code postal (normalisé).
+#           En cas de multi-communes, la première par ordre alphabétique est retenue.
+
+#       - name: CODE_DEPARTEMENT
+#         description: |
+#           Code département normalisé (TRIM).
+#           Lien avec la dimension commune et adresse.
+#         tests:
+#           - not_null
+
+#       - name: VOIE
+#         description: |
+#           Nom d'une voie représentative pour ce code postal (normalisé).
+#           Information contextuelle, peut varier selon les données sources.
+
+#       - name: CREATED_AT
+#         description: |
+#           Horodatage de création de l'enregistrement.
+#           Alimenté via CURRENT_TIMESTAMP().
+#         tests:
+#           - not_null
+
+#   # =============================================================================
+#   # DIMENSION : COMMUNES
+#   # =============================================================================
+#   - name: dim_commune
+#     description: |
+#       **Dimension Commune - Référentiel administratif**
+
+#       Table de dimension contenant toutes les communes uniques issues des adresses.
+
+#       **Processus de construction :**
+#       1. Source : dim_address (adresses déjà normalisées)
+#       2. Extraction COMMUNE + CODE_DEPARTEMENT
+#       3. Génération clé technique via HASH
+#       4. Déduplication stricte
+
+#       **Utilisation :**
+#       - Jointure avec fact_mutation sur COMMUNE_ID
+#       - Analyses géographiques niveau commune
+#       - Reporting par collectivité territoriale
+
+#       **Grain :** Une ligne par couple unique (COMMUNE, CODE_DEPARTEMENT)
+
+#     columns:
+#       - name: COMMUNE_ID
+#         description: |
+#           **Clé primaire technique** - Identifiant unique de la commune.
+
+#           Générée via HASH(COMMUNE || CODE_DEPARTEMENT).
+#           Le département est nécessaire car certaines communes ont le même nom dans différents départements.
+#           Exemple : "Saint-Denis" existe en Seine-Saint-Denis (93) et à La Réunion (974).
+#         tests:
+#           - unique
+#           - not_null
+
+#       - name: COMMUNE
+#         description: |
+#           Nom de la commune normalisé (UPPER + TRIM).
+#           Exemple : "PARIS", "LYON", "MARSEILLE"
+#         tests:
+#           - not_null
+
+#       - name: CODE_DEPARTEMENT
+#         description: |
+#           Code département normalisé (TRIM).
+#           Permet de distinguer les homonymes.
+#         tests:
+#           - not_null
+
+#       - name: CREATED_AT
+#         description: |
+#           Horodatage de création de l'enregistrement.
+#           Alimenté via CURRENT_TIMESTAMP().
+#         tests:
+#           - not_null
+
+#   # =============================================================================
+#   # DIMENSION : PARCELLES CADASTRALES
+#   # =============================================================================
+#   - name: dim_parcelle
+#     description: |
+#       **Dimension Parcelle - Référentiel cadastral**
+
+#       Table de dimension contenant les parcelles cadastrales uniques.
+
+#       **Identification cadastrale :**
+#       Une parcelle est identifiée par :
+#       - PREFIXE_DE_SECTION (optionnel)
+#       - SECTION (obligatoire)
+#       - NO_PLAN (obligatoire)
+#       - NO_VOLUME (optionnel, pour copropriétés)
+
+#       **Processus de construction :**
+#       1. Normalisation (trim, upper)
+#       2. Génération clé technique via HASH des 4 composants
+#       3. Flag qualité IS_PARTIAL si SECTION ou NO_PLAN manquants
+#       4. Déduplication stricte
+
+#       **Utilisation :**
+#       - Jointure avec fact_mutation sur PARCELLE_ID
+#       - Analyses foncières et cadastrales
+#       - Suivi des mutations par parcelle
+
+#       **Grain :** Une ligne par combinaison unique (PREFIXE_DE_SECTION, SECTION, NO_PLAN, NO_VOLUME)
+
+#     columns:
+#       - name: PARCELLE_ID
+#         description: |
+#           **Clé primaire technique** - Identifiant unique de la parcelle cadastrale.
+
+#           Générée via HASH des 4 composants cadastraux normalisés.
+#           Permet de suivre les mutations multiples sur une même parcelle.
+#         tests:
+#           - unique
+#           - not_null
+
+#       - name: PREFIXE_DE_SECTION
+#         description: |
+#           Préfixe de la section cadastrale (normalisé UPPER + TRIM).
+#           Optionnel, peut être NULL.
+#           Utilisé pour subdiviser géographiquement les sections.
+
+#       - name: SECTION
+#         description: |
+#           Section cadastrale (normalisée UPPER + TRIM).
+#           Obligatoire pour identifier une parcelle.
+#           Format : généralement 2 caractères (ex : "AB", "01").
+
+#       - name: NO_PLAN
+#         description: |
+#           Numéro de plan cadastral (normalisé TRIM).
+#           Obligatoire, identifie la parcelle au sein de la section.
+#           Format : numérique (ex : "123", "0045").
+
+#       - name: NO_VOLUME
+#         description: |
+#           Numéro de volume (normalisé TRIM).
+#           Optionnel, utilisé pour les lots en copropriété.
+#           NULL si parcelle simple (non divisée en volumes).
+
+#       - name: IS_PARTIAL
+#         description: |
+#           **Flag qualité** - Indicateur de parcelle incomplète.
+
+#           Valeurs :
+#           - 0 : Parcelle complète (SECTION et NO_PLAN renseignés)
+#           - 1 : Parcelle incomplète (SECTION ou NO_PLAN manquants)
+
+#           Permet de filtrer les parcelles mal identifiées pour des analyses de qualité.
+#         tests:
+#           - not_null
+#           - accepted_values:
+#               values: [0, 1]
+
+#       - name: CREATED_AT
+#         description: |
+#           Horodatage de création de l'enregistrement.
+#           Alimenté via CURRENT_TIMESTAMP().
+#         tests:
+#           - not_null
+
+#   # =============================================================================
+#   # DIMENSION : TYPES DE LOCAUX
+#   # =============================================================================
+#   - name: dim_type_local
+#     description: |
+#       **Dimension Type de Local - Référentiel typologique**
+
+#       Table de dimension contenant les types de biens immobiliers.
+
+#       **Valeurs courantes :**
+#       - Maison
+#       - Appartement
+#       - Local industriel. commercial. ou assimilé
+#       - Dépendance
+#       - INCONNU (valeur par défaut si NULL)
+
+#       **Processus de construction :**
+#       1. Normalisation (UPPER + TRIM)
+#       2. Remplacement NULL → 'INCONNU'
+#       3. Génération clé technique via HASH
+#       4. Déduplication stricte
+
+#       **Utilisation :**
+#       - Jointure avec fact_mutation sur TYPE_LOCAL_ID
+#       - Segmentation des analyses par type de bien
+#       - Reporting marché résidentiel vs commercial
+
+#       **Grain :** Une ligne par type de local unique
+
+#     columns:
+#       - name: TYPE_LOCAL_ID
+#         description: |
+#           **Clé primaire technique** - Identifiant unique du type de local.
+
+#           Générée via HASH(TYPE_LOCAL).
+#           La valeur 'INCONNU' est utilisée comme fallback pour les types NULL.
+#         tests:
+#           - unique
+#           - not_null
+
+#       - name: TYPE_LOCAL
+#         description: |
+#           Libellé du type de local normalisé (UPPER + TRIM).
+
+#           Valeurs principales :
+#           - Maison
+#           - Appartement
+#           - Local industriel. commercial. ou assimilé
+#           - Dépendance
+#           - INCONNU (si valeur source NULL)
+#         tests:
+#           - not_null
+
+#       - name: CREATED_AT
+#         description: |
+#           Horodatage de création de l'enregistrement.
+#           Alimenté via CURRENT_TIMESTAMP().
+#         tests:
+#           - not_null
+
+#       - name: SOURCE_SYSTEM
+#         description: |
+#           Système source ayant alimenté cette dimension.
+#           Valeur fixe : 'DVF' (Demandes de Valeurs Foncières).
+
+#           Permet de tracer l'origine des données pour des enrichissements futurs.
+#         tests:
+#           - not_null
+#           - accepted_values:
+#               values: ['DVF']
+
+#   # =============================================================================
+#   # TABLE DE FAITS : MUTATIONS IMMOBILIÈRES
+#   # =============================================================================
+#   - name: fact_mutation
+#     description: |
+#       **Table de Faits - Mutations immobilières DVF**
+
+#       Table centrale du modèle en étoile contenant toutes les transactions immobilières (ventes).
+
+#       **Architecture :**
+#       - Schéma en étoile (star schema)
+#       - Clés étrangères vers 5 dimensions : address, commune, parcelle, type_local, code_postal
+#       - Mesures : valeur foncière, surfaces, nombre de pièces
+#       - Attributs dégénérés : date mutation, nature mutation
+
+#       **Stratégie de jointure ADDRESS :**
+#       La colonne ADDRESS_MATCH_STRATEGY trace la qualité du lien adresse :
+#       - 'MATCH_ADDRESS' : jointure parfaite sur 6 champs (meilleure qualité)
+#       - 'FALLBACK_COMMUNE' : fallback sur commune uniquement (adresse incomplète)
+#       - 'NO_MATCH' : aucun match (cas marginal, nécessite investigation)
+
+#       Si aucune adresse exacte n'est trouvée, un ADDRESS_ID de secours est généré via
+#       HASH('UNKNOWN|' || commune || département).
+
+#       **Processus de construction :**
+#       1. Nettoyage et normalisation des données silver
+#       2. Jointures LEFT avec les 5 dimensions
+#       3. Application stratégie de fallback pour ADDRESS_ID
+#       4. Calcul du flag ADDRESS_MATCH_STRATEGY
+
+#       **Utilisation :**
+#       - Analyses du marché immobilier (prix au m², évolution temporelle)
+#       - Reporting géographique multi-niveaux (adresse, commune, département, CP)
+#       - Études par typologie de biens
+#       - Analyses cadastrales et foncières
+
+#       **Grain :** Une ligne par transaction immobilière (mutation)
+
+#     columns:
+#       # -------------------------------------------------------------------------
+#       # CLÉS ÉTRANGÈRES (Foreign Keys)
+#       # -------------------------------------------------------------------------
+#       - name: ADDRESS_ID
+#         description: |
+#           **Clé étrangère** vers dim_address.
+
+#           Lien vers l'adresse normalisée du bien.
+
+#           **Stratégie de jointure avec fallback :**
+#           1. Tentative de match sur 6 champs normalisés (NO_VOIE, TYPE_DE_VOIE, VOIE, CP, COMMUNE, DEPT)
+#           2. Si échec : génération d'un ADDRESS_ID de secours via HASH('UNKNOWN|' || commune || département)
+#           3. Garantit l'absence de NULL (requis pour intégrité référentielle Power BI)
+
+#           Voir ADDRESS_MATCH_STRATEGY pour tracer la qualité du lien.
+#         tests:
+#           - not_null
+#           - relationships:
+#               to: ref('dim_address')
+#               field: ADDRESS_ID
+
+#       - name: COMMUNE_ID
+#         description: |
+#           **Clé étrangère** vers dim_commune.
+
+#           Lien vers la commune du bien.
+#           Jointure sur COMMUNE + CODE_DEPARTEMENT normalisés.
+
+#           Peut être NULL si commune absente ou non reconnue (cas marginal).
+#         tests:
+#           - relationships:
+#               to: ref('dim_commune')
+#               field: COMMUNE_ID
+
+#       - name: PARCELLE_ID
+#         description: |
+#           **Clé étrangère** vers dim_parcelle.
+
+#           Lien vers la parcelle cadastrale.
+#           Jointure sur PREFIXE_DE_SECTION + SECTION + NO_PLAN + NO_VOLUME.
+
+#           Peut être NULL si identifiant cadastral incomplet ou absent.
+#         tests:
+#           - relationships:
+#               to: ref('dim_parcelle')
+#               field: PARCELLE_ID
+
+#       - name: TYPE_LOCAL_ID
+#         description: |
+#           **Clé étrangère** vers dim_type_local.
+
+#           Lien vers le type de bien (Maison, Appartement, etc.).
+
+#           Peut être NULL si type non renseigné (rare, car fallback 'INCONNU' appliqué en dimension).
+#         tests:
+#           - relationships:
+#               to: ref('dim_type_local')
+#               field: TYPE_LOCAL_ID
+
+#       - name: CODE_POSTAL_ID
+#         description: |
+#           **Clé étrangère** vers dim_code_postal.
+
+#           Lien vers le code postal.
+#           Jointure sur CODE_POSTAL + CODE_DEPARTEMENT.
+
+#           Peut être NULL si code postal absent ou mal formé.
+#         tests:
+#           - relationships:
+#               to: ref('dim_code_postal')
+#               field: CODE_POSTAL_ID
+
+#       # -------------------------------------------------------------------------
+#       # TRAÇABILITÉ QUALITÉ
+#       # -------------------------------------------------------------------------
+#       - name: ADDRESS_MATCH_STRATEGY
+#         description: |
+#           **Indicateur de qualité du lien adresse**
+
+#           Valeurs possibles :
+#           - 'MATCH_ADDRESS' : Jointure réussie sur adresse complète (6 champs)
+#             → Meilleure qualité, géolocalisation précise possible
+
+#           - 'FALLBACK_COMMUNE' : Adresse incomplète, fallback sur commune uniquement
+#             → Qualité moyenne, géolocalisation au niveau commune
+
+#           - 'NO_MATCH' : Aucun match (ni adresse ni commune)
+#             → Qualité faible, nécessite investigation des données sources
+
+#           **Utilisation :**
+#           - Filtrer les analyses sur MATCH_ADDRESS pour garantir précision géographique
+#           - Identifier les lignes nécessitant enrichissement ou correction
+#           - Mesurer la qualité globale du référentiel adresse
+#         tests:
+#           - not_null
+#           - accepted_values:
+#               values: ['MATCH_ADDRESS', 'FALLBACK_COMMUNE', 'NO_MATCH']
+
+#       # -------------------------------------------------------------------------
+#       # ATTRIBUTS DÉGÉNÉRÉS
+#       # -------------------------------------------------------------------------
+#       - name: DATE_MUTATION
+#         description: |
+#           **Date de la mutation** (transaction immobilière).
+
+#           Format : DATE (YYYY-MM-DD)
+#           Source : convertie depuis format texte DD/MM/YYYY.
+
+#           **Utilisation :**
+#           - Analyses temporelles (évolutions prix, volumétrie)
+#           - Segmentation par période (mois, trimestre, année)
+#           - Calcul d'indicateurs glissants (moyenne mobile 12 mois, etc.)
+#         tests:
+#           - not_null
+
+#       - name: NATURE_MUTATION
+#         description: |
+#           Nature juridique de la mutation.
+
+#           Valeur unique dans cette table : 'Vente'
+#           (Le filtre est appliqué en amont dans dvf_silver et fact_mutation)
+
+#           Autres valeurs possibles dans les données brutes (non incluses ici) :
+#           - Échange
+#           - Adjudication
+#           - Expropriation
+#         tests:
+#           - not_null
+#           - accepted_values:
+#               values: ['Vente']
+
+#       # -------------------------------------------------------------------------
+#       # MESURES (Metrics)
+#       # -------------------------------------------------------------------------
+#       - name: VALEUR_FONCIERE
+#         description: |
+#           **Montant de la transaction** en euros (€).
+
+#           Valeur numérique convertie depuis format texte (virgule → point).
+
+#           **Filtre appliqué en amont :** > 20 000 €
+
+#           **Utilisation :**
+#           - Analyses de prix (médiane, moyenne, distribution)
+#           - Calcul prix au m² (VALEUR_FONCIERE / SURFACE_REELLE_BATI)
+#           - Segmentation par tranches de prix
+#           - Détection outliers (valeurs aberrantes)
+
+#           **Attention :** Peut inclure plusieurs biens dans une même transaction.
+
+#       - name: SURFACE_REELLE_BATI
+#         description: |
+#           **Surface habitable du bien** en m².
+
+#           Surface réelle du bâti (loi Carrez pour copropriétés).
+#           Valeur numérique convertie depuis format texte.
+
+#           **Utilisation :**
+#           - Calcul prix au m² habitable
+#           - Segmentation par taille de bien
+#           - Analyses de marché par typologie
+
+#           Peut être NULL pour :
+#           - Terrains nus (pas de bâti)
+#           - Données incomplètes
+
+#       - name: NOMBRE_PIECES_PRINCIPALES
+#         description: |
+#           **Nombre de pièces principales** du bien.
+
+#           Définition : chambres, salon, salle à manger, bureau.
+#           Exclut : cuisine, salle de bains, WC, couloirs, dégagements.
+
+#           Valeur numérique convertie via TRY_TO_NUMBER (NULL si conversion échoue).
+
+#           **Utilisation :**
+#           - Typologie T1, T2, T3, T4, T5+ (T = nombre de pièces hors cuisine)
+#           - Analyses par segment (studio, 2 pièces, 3 pièces, etc.)
+#           - Calcul prix par pièce
+
+#           Peut être NULL pour :
+#           - Locaux commerciaux ou industriels
+#           - Terrains nus
+#           - Données manquantes
+
+#       - name: SURFACE_TERRAIN
+#         description: |
+#           **Surface du terrain** en m².
+
+#           Surface cadastrale de la parcelle.
+#           Valeur numérique convertie depuis format texte.
+
+#           **Utilisation :**
+#           - Analyses foncières
+#           - Calcul prix au m² de terrain
+#           - Segmentation maisons avec/sans terrain
+#           - Études densité urbaine
+
+#           Peut être NULL pour :
+#           - Appartements (pas de terrain privatif)
+#           - Données incomplètes
+
+#           **Note :** Pour une maison, SURFACE_TERRAIN > SURFACE_REELLE_BATI (terrain inclut jardin, parking, etc.)
+
+#       # -------------------------------------------------------------------------
+#       # MÉTADONNÉES TECHNIQUES
+#       # -------------------------------------------------------------------------
+#       - name: CREATED_AT
+#         description: |
+#           Horodatage de création de l'enregistrement dans la fact table.
+#           Alimenté via CURRENT_TIMESTAMP() lors de l'exécution dbt.
+
+#           **Utilisation :**
+#           - Audit et traçabilité des chargements
+#           - Détection des nouvelles lignes depuis dernier run
+#           - Debugging pipelines dbt
+#         tests:
+#           - not_null
