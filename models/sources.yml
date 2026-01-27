@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: "Tables Bronze existantes sur Snowflake"
+    database: VALFONC_RAW
+    schema: BRONZE
+    tables:
+      - name: DVF_RAW_VARCHAR
+        description: "Données DVF brutes"
+
+      - name: BAN_ADRESSES
+        description: "Données BAN brutes"
